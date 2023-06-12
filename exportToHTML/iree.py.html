@@ -1,0 +1,236 @@
+<html>
+<head>
+<title>iree.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #cc7832;}
+.s4 { color: #6a8759;}
+.s5 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+iree.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright 2021 The JAX Authors.</span>
+<span class="s0">#</span>
+<span class="s0"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="s0"># you may not use this file except in compliance with the License.</span>
+<span class="s0"># You may obtain a copy of the License at</span>
+<span class="s0">#</span>
+<span class="s0">#     https://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="s0">#</span>
+<span class="s0"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="s0"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="s0"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="s0"># See the License for the specific language governing permissions and</span>
+<span class="s0"># limitations under the License.</span>
+
+<span class="s2">&quot;&quot;&quot;Experimental IREE backend for JAX. 
+ 
+This backend is quite incomplete, but exists to allow experimenting with 
+using IREE to compile and run JAX computations instead of XLA. 
+&quot;&quot;&quot;</span>
+
+<span class="s0"># pytype: skip-file</span>
+
+<span class="s3">from </span><span class="s1">__future__ </span><span class="s3">import </span><span class="s1">annotations</span>
+
+<span class="s3">import </span><span class="s1">os</span>
+<span class="s3">import </span><span class="s1">platform</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Any</span><span class="s3">, </span><span class="s1">List</span><span class="s3">, </span><span class="s1">Sequence</span><span class="s3">, </span><span class="s1">Optional</span>
+
+<span class="s3">import </span><span class="s1">iree.compiler</span>
+<span class="s3">import </span><span class="s1">iree.runtime</span>
+
+<span class="s3">from </span><span class="s1">jax._src.config </span><span class="s3">import </span><span class="s1">flags</span>
+<span class="s3">from </span><span class="s1">jax._src.lib </span><span class="s3">import </span><span class="s1">xla_client</span>
+<span class="s3">import </span><span class="s1">numpy </span><span class="s3">as </span><span class="s1">np</span>
+
+<span class="s1">FLAGS = flags.FLAGS</span>
+
+
+<span class="s1">flags.DEFINE_string(</span>
+    <span class="s4">'jax_iree_backend'</span><span class="s3">, </span><span class="s1">os.getenv(</span><span class="s4">'JAX_IREE_BACKEND'</span><span class="s3">, </span><span class="s4">'cpu'</span><span class="s1">)</span><span class="s3">,</span>
+    <span class="s4">'IREE compiler backend to use.'</span><span class="s1">)</span>
+
+<span class="s1">iree_compiler_map = {</span>
+  <span class="s4">&quot;cpu&quot; </span><span class="s1">: </span><span class="s4">&quot;llvm-cpu&quot;</span><span class="s3">,</span>
+  <span class="s4">&quot;cuda&quot; </span><span class="s1">: </span><span class="s4">&quot;cuda&quot;</span><span class="s3">,</span>
+  <span class="s4">&quot;vmvx&quot; </span><span class="s1">: </span><span class="s4">&quot;vmvx&quot;</span><span class="s3">,</span>
+  <span class="s4">&quot;vulkan&quot; </span><span class="s1">: </span><span class="s4">&quot;vulkan-spirv&quot;</span>
+<span class="s1">}</span>
+
+<span class="s1">iree_runtime_map = {</span>
+  <span class="s4">&quot;cpu&quot; </span><span class="s1">: </span><span class="s4">&quot;local-task&quot;</span><span class="s3">,</span>
+  <span class="s4">&quot;cuda&quot; </span><span class="s1">: </span><span class="s4">&quot;cuda&quot;</span><span class="s3">,</span>
+  <span class="s4">&quot;vmvx&quot; </span><span class="s1">: </span><span class="s4">&quot;local-task&quot;</span><span class="s3">,</span>
+  <span class="s4">&quot;vulkan&quot; </span><span class="s1">: </span><span class="s4">&quot;vulkan&quot;</span>
+<span class="s1">}</span>
+
+<span class="s3">class </span><span class="s1">IreeDevice:</span>
+
+  <span class="s3">def </span><span class="s1">__init__(self</span><span class="s3">, </span><span class="s1">client):</span>
+    <span class="s1">self.id = </span><span class="s5">0</span>
+    <span class="s1">self.host_id = </span><span class="s5">0</span>
+    <span class="s1">self.process_index = </span><span class="s5">0</span>
+    <span class="s1">self.platform = </span><span class="s4">&quot;iree&quot;</span>
+    <span class="s1">self.device_kind = </span><span class="s4">&quot;IREE device&quot;</span>
+    <span class="s1">self.client = client</span>
+
+  <span class="s3">def </span><span class="s1">__str__(self) -&gt; str:</span>
+    <span class="s3">return </span><span class="s4">&quot;IreeDevice&quot;</span>
+
+  <span class="s3">def </span><span class="s1">transfer_to_infeed(self</span><span class="s3">, </span><span class="s1">literal: Any):</span>
+    <span class="s3">raise </span><span class="s1">NotImplementedError(</span><span class="s4">&quot;transfer_to_infeed&quot;</span><span class="s1">)</span>
+
+  <span class="s3">def </span><span class="s1">transfer_from_outfeed(self</span><span class="s3">, </span><span class="s1">shape: xla_client.Shape):</span>
+    <span class="s3">raise </span><span class="s1">NotImplementedError(</span><span class="s4">&quot;transfer_to_outfeed&quot;</span><span class="s1">)</span>
+
+  <span class="s3">def </span><span class="s1">live_buffers(self) -&gt; List[IreeBuffer]:</span>
+    <span class="s3">raise </span><span class="s1">NotImplementedError(</span><span class="s4">&quot;live_buffers&quot;</span><span class="s1">)</span>
+
+
+<span class="s3">class </span><span class="s1">IreeBuffer:</span>
+
+  <span class="s3">def </span><span class="s1">__init__(self</span><span class="s3">, </span><span class="s1">client</span><span class="s3">, </span><span class="s1">device</span><span class="s3">, </span><span class="s1">buffer):</span>
+    <span class="s1">self.client = client</span>
+    <span class="s1">self._device = device</span>
+    <span class="s3">assert </span><span class="s1">device </span><span class="s3">is not None</span>
+    <span class="s1">self._buffer = buffer</span>
+
+  <span class="s3">def </span><span class="s1">copy_to_device(self</span><span class="s3">, </span><span class="s1">device):</span>
+    <span class="s3">return </span><span class="s1">self</span>
+
+  <span class="s3">def </span><span class="s1">__array__(self</span><span class="s3">, </span><span class="s1">dtype=</span><span class="s3">None, </span><span class="s1">context=</span><span class="s3">None</span><span class="s1">):</span>
+    <span class="s3">return </span><span class="s1">np.asarray(self._buffer)</span>
+
+  <span class="s3">def </span><span class="s1">to_iree(self):</span>
+    <span class="s3">return </span><span class="s1">self._buffer</span>
+
+  <span class="s3">def </span><span class="s1">platform(self):</span>
+    <span class="s3">return </span><span class="s1">self.client.platform</span>
+
+  <span class="s3">def </span><span class="s1">device(self):</span>
+    <span class="s3">return </span><span class="s1">self._device</span>
+
+  <span class="s3">def </span><span class="s1">block_until_ready(self) -&gt; IreeBuffer:</span>
+    <span class="s3">return </span><span class="s1">self  </span><span class="s0"># no async</span>
+
+  <span class="s0"># overrides repr on base class which expects _value and aval attributes</span>
+  <span class="s3">def </span><span class="s1">__repr__(self): </span><span class="s3">return </span><span class="s4">f'IreeBuffer(</span><span class="s3">{</span><span class="s1">np.asarray(self)</span><span class="s3">}</span><span class="s4">)'</span>
+
+  <span class="s1">@property</span>
+  <span class="s3">def </span><span class="s1">_value(self):</span>
+    <span class="s3">return </span><span class="s1">np.asarray(self)</span>
+
+  <span class="s3">def </span><span class="s1">copy_to_host_async(self):</span>
+    <span class="s3">return </span><span class="s1">self</span>
+
+<span class="s3">class </span><span class="s1">IreeExecutable:</span>
+
+  <span class="s3">def </span><span class="s1">__init__(self</span><span class="s3">, </span><span class="s1">client</span><span class="s3">, </span><span class="s1">devices</span><span class="s3">, </span><span class="s1">module_object</span><span class="s3">, </span><span class="s1">function_name):</span>
+    <span class="s1">self.client = client</span>
+    <span class="s1">self.traceback = </span><span class="s3">None</span>
+    <span class="s1">self.fingerprint = </span><span class="s3">None</span>
+    <span class="s1">self._devices = devices</span>
+    <span class="s1">self.module_object = module_object</span>
+    <span class="s1">self.function_name = function_name</span>
+
+  <span class="s3">def </span><span class="s1">local_devices(self) -&gt; List[IreeDevice]:</span>
+    <span class="s3">return </span><span class="s1">self._devices</span>
+
+  <span class="s3">def </span><span class="s1">execute(self</span><span class="s3">, </span><span class="s1">arguments: Sequence[IreeBuffer]) -&gt; List[IreeBuffer]:</span>
+    <span class="s1">inputs = [arg.to_iree() </span><span class="s3">for </span><span class="s1">arg </span><span class="s3">in </span><span class="s1">arguments]</span>
+    <span class="s1">outputs = self.module_object[self.function_name](*inputs)</span>
+    <span class="s0"># TODO(phawkins): Have a way to just have it always return the list,</span>
+    <span class="s0"># regardless of arity.</span>
+    <span class="s3">if not </span><span class="s1">isinstance(outputs</span><span class="s3">, </span><span class="s1">list) </span><span class="s3">and not </span><span class="s1">isinstance(outputs</span><span class="s3">, </span><span class="s1">tuple):</span>
+      <span class="s1">outputs = [outputs]</span>
+    <span class="s3">return </span><span class="s1">[</span>
+        <span class="s1">IreeBuffer(self.client</span><span class="s3">, </span><span class="s1">self._devices[</span><span class="s5">0</span><span class="s1">]</span><span class="s3">, </span><span class="s1">output) </span><span class="s3">for </span><span class="s1">output </span><span class="s3">in </span><span class="s1">outputs</span>
+    <span class="s1">]</span>
+
+
+<span class="s3">class </span><span class="s1">IreeClient:</span>
+
+  <span class="s3">def </span><span class="s1">__init__(self</span><span class="s3">,</span>
+               <span class="s1">*</span><span class="s3">,</span>
+               <span class="s1">iree_backend: Optional[str] = </span><span class="s3">None</span><span class="s1">):</span>
+    <span class="s1">self.platform = </span><span class="s4">&quot;iree&quot;</span>
+    <span class="s1">self.platform_version = </span><span class="s4">&quot;0.0.1&quot;</span>
+    <span class="s1">self.runtime_type = </span><span class="s4">&quot;iree&quot;</span>
+    <span class="s1">self.iree_backend = (FLAGS.jax_iree_backend </span><span class="s3">if </span><span class="s1">iree_backend </span><span class="s3">is None</span>
+                        <span class="s3">else </span><span class="s1">iree_backend)</span>
+    <span class="s1">self.compiler_driver = iree_compiler_map[self.iree_backend]</span>
+    <span class="s1">self.runtime_driver = iree_runtime_map[self.iree_backend]</span>
+    <span class="s1">self.iree_config = iree.runtime.system_api.Config(self.runtime_driver)</span>
+    <span class="s1">self._devices = [IreeDevice(self)]</span>
+
+  <span class="s3">def </span><span class="s1">process_index(self) -&gt; int:</span>
+    <span class="s3">return </span><span class="s5">0</span>
+
+  <span class="s3">def </span><span class="s1">device_count(self) -&gt; int:</span>
+    <span class="s3">return </span><span class="s1">len(self._devices)</span>
+
+  <span class="s3">def </span><span class="s1">devices(self) -&gt; List[IreeDevice]:</span>
+    <span class="s3">return </span><span class="s1">self._devices</span>
+
+  <span class="s3">def </span><span class="s1">local_devices(self) -&gt; List[IreeDevice]:</span>
+    <span class="s3">return </span><span class="s1">self._devices</span>
+
+  <span class="s3">def </span><span class="s1">local_device_count(self) -&gt; int:</span>
+    <span class="s3">return </span><span class="s1">len(self._devices)</span>
+
+  <span class="s3">def </span><span class="s1">get_default_device_assignment(</span>
+      <span class="s1">self</span><span class="s3">,</span>
+      <span class="s1">num_replicas: int) -&gt; List[IreeDevice]:</span>
+    <span class="s3">if </span><span class="s1">num_replicas != </span><span class="s5">1</span><span class="s1">:</span>
+      <span class="s3">raise </span><span class="s1">NotImplementedError(</span><span class="s4">&quot;Only single-device computations implemented&quot;</span><span class="s1">)</span>
+    <span class="s3">return </span><span class="s1">[self._devices[</span><span class="s5">0</span><span class="s1">]]</span>
+
+
+  <span class="s3">def </span><span class="s1">compile(self</span><span class="s3">, </span><span class="s1">computation: str</span><span class="s3">,</span>
+              <span class="s1">compile_options: xla_client.CompileOptions) -&gt; IreeExecutable:</span>
+    <span class="s3">del </span><span class="s1">compile_options  </span><span class="s0"># Ignored.</span>
+    <span class="s1">extra_args = []</span>
+    <span class="s0"># extra_args=[&quot;--mlir-print-ir-after-all&quot;]</span>
+    <span class="s3">if </span><span class="s1">platform.system() == </span><span class="s4">&quot;Darwin&quot; </span><span class="s3">and </span><span class="s1">platform.machine() == </span><span class="s4">&quot;arm64&quot;</span><span class="s1">:</span>
+      <span class="s1">extra_args += [</span><span class="s4">&quot;--iree-llvm-target-triple=arm64-apple-darwin21.5.0&quot;</span><span class="s1">]</span>
+    <span class="s1">iree_binary = iree.compiler.compile_str(</span>
+        <span class="s1">computation</span><span class="s3">, </span><span class="s1">target_backends=[self.compiler_driver]</span><span class="s3">, </span><span class="s1">input_type=</span><span class="s4">&quot;mhlo&quot;</span><span class="s3">,</span>
+        <span class="s0"># extended_diagnostics=True,</span>
+        <span class="s1">extra_args=extra_args</span><span class="s3">,</span>
+    <span class="s1">)</span>
+    <span class="s0"># Load it into the runtime.</span>
+    <span class="s1">vm_module = iree.runtime.VmModule.from_flatbuffer(</span>
+      <span class="s1">self.iree_config.vm_instance</span><span class="s3">, </span><span class="s1">iree_binary)</span>
+    <span class="s1">module_object = iree.runtime.load_vm_module(vm_module</span><span class="s3">, </span><span class="s1">self.iree_config)</span>
+    <span class="s3">return </span><span class="s1">IreeExecutable(self</span><span class="s3">, </span><span class="s1">self._devices</span><span class="s3">, </span><span class="s1">module_object</span><span class="s3">, </span><span class="s4">&quot;main&quot;</span><span class="s1">)</span>
+
+  <span class="s3">def </span><span class="s1">buffer_from_pyval(</span>
+      <span class="s1">self</span><span class="s3">,</span>
+      <span class="s1">argument: Any</span><span class="s3">,</span>
+      <span class="s1">device: Optional[IreeDevice]</span><span class="s3">,</span>
+      <span class="s1">force_copy: bool = </span><span class="s3">True,</span>
+      <span class="s1">host_buffer_semantics: xla_client.HostBufferSemantics = xla_client</span>
+      <span class="s1">.HostBufferSemantics.ZERO_COPY</span>
+  <span class="s1">) -&gt; IreeBuffer:</span>
+    <span class="s0"># TODO(phawkins): IREE's python API will accept a numpy array directly but</span>
+    <span class="s0"># may want to explicitly construct a lower level BufferView to avoid copies.</span>
+    <span class="s3">if </span><span class="s1">device </span><span class="s3">is None</span><span class="s1">:</span>
+      <span class="s3">assert </span><span class="s1">type(argument) </span><span class="s3">is </span><span class="s1">np.ndarray</span>
+      <span class="s1">device = self._devices[</span><span class="s5">0</span><span class="s1">]</span>
+    <span class="s3">return </span><span class="s1">IreeBuffer(self</span><span class="s3">, </span><span class="s1">device</span><span class="s3">, </span><span class="s1">np.array(argument</span><span class="s3">, </span><span class="s1">copy=</span><span class="s3">True</span><span class="s1">))</span>
+
+
+<span class="s3">def </span><span class="s1">iree_client_factory():</span>
+  <span class="s3">return </span><span class="s1">IreeClient()</span>
+</pre>
+</body>
+</html>

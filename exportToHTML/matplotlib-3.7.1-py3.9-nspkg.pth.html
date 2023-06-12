@@ -1,0 +1,18 @@
+<html>
+<head>
+<title>matplotlib-3.7.1-py3.9-nspkg.pth</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #a9b7c6;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+matplotlib-3.7.1-py3.9-nspkg.pth</font>
+</center></td></tr></table>
+<pre><span class="s0">import sys, types, os;has_mfs = sys.version_info &gt; (3, 5);p = os.path.join(sys._getframe(1).f_locals['sitedir'], *('mpl_toolkits',));importlib = has_mfs and __import__('importlib.util');has_mfs and __import__('importlib.machinery');m = has_mfs and sys.modules.setdefault('mpl_toolkits', importlib.util.module_from_spec(importlib.machinery.PathFinder.find_spec('mpl_toolkits', [os.path.dirname(p)])));m = m or sys.modules.setdefault('mpl_toolkits', types.ModuleType('mpl_toolkits'));mp = (m or []) and m.__dict__.setdefault('__path__',[]);(p not in mp) and mp.append(p)</span>
+</pre>
+</body>
+</html>

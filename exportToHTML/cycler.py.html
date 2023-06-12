@@ -1,0 +1,523 @@
+<html>
+<head>
+<title>cycler.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #629755; font-style: italic;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6a8759;}
+.s4 { color: #808080;}
+.s5 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+cycler.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+Cycler 
+====== 
+ 
+Cycling through combinations of values, producing dictionaries. 
+ 
+You can add cyclers:: 
+ 
+    from cycler import cycler 
+    cc = (cycler(color=list('rgb')) + 
+          cycler(linestyle=['-', '--', '-.'])) 
+    for d in cc: 
+        print(d) 
+ 
+Results in:: 
+ 
+    {'color': 'r', 'linestyle': '-'} 
+    {'color': 'g', 'linestyle': '--'} 
+    {'color': 'b', 'linestyle': '-.'} 
+ 
+ 
+You can multiply cyclers:: 
+ 
+    from cycler import cycler 
+    cc = (cycler(color=list('rgb')) * 
+          cycler(linestyle=['-', '--', '-.'])) 
+    for d in cc: 
+        print(d) 
+ 
+Results in:: 
+ 
+    {'color': 'r', 'linestyle': '-'} 
+    {'color': 'r', 'linestyle': '--'} 
+    {'color': 'r', 'linestyle': '-.'} 
+    {'color': 'g', 'linestyle': '-'} 
+    {'color': 'g', 'linestyle': '--'} 
+    {'color': 'g', 'linestyle': '-.'} 
+    {'color': 'b', 'linestyle': '-'} 
+    {'color': 'b', 'linestyle': '--'} 
+    {'color': 'b', 'linestyle': '-.'} 
+&quot;&quot;&quot;</span>
+
+
+<span class="s2">import </span><span class="s1">copy</span>
+<span class="s2">from </span><span class="s1">functools </span><span class="s2">import </span><span class="s1">reduce</span>
+<span class="s2">from </span><span class="s1">itertools </span><span class="s2">import </span><span class="s1">product</span><span class="s2">, </span><span class="s1">cycle</span>
+<span class="s2">from </span><span class="s1">operator </span><span class="s2">import </span><span class="s1">mul</span><span class="s2">, </span><span class="s1">add</span>
+
+<span class="s1">__version__ = </span><span class="s3">'0.10.0'</span>
+
+
+<span class="s2">def </span><span class="s1">_process_keys(left</span><span class="s2">, </span><span class="s1">right):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Helper function to compose cycler keys. 
+ 
+    Parameters 
+    ---------- 
+    left, right : iterable of dictionaries or None 
+        The cyclers to be composed. 
+ 
+    Returns 
+    ------- 
+    keys : set 
+        The keys in the composition of the two cyclers. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">l_peek = next(iter(left)) </span><span class="s2">if </span><span class="s1">left </span><span class="s2">is not None else </span><span class="s1">{}</span>
+    <span class="s1">r_peek = next(iter(right)) </span><span class="s2">if </span><span class="s1">right </span><span class="s2">is not None else </span><span class="s1">{}</span>
+    <span class="s1">l_key = set(l_peek.keys())</span>
+    <span class="s1">r_key = set(r_peek.keys())</span>
+    <span class="s2">if </span><span class="s1">l_key &amp; r_key:</span>
+        <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s3">&quot;Can not compose overlapping cycles&quot;</span><span class="s1">)</span>
+    <span class="s2">return </span><span class="s1">l_key | r_key</span>
+
+
+<span class="s2">def </span><span class="s1">concat(left</span><span class="s2">, </span><span class="s1">right):</span>
+    <span class="s0">r&quot;&quot;&quot; 
+    Concatenate `Cycler`\s, as if chained using `itertools.chain`. 
+ 
+    The keys must match exactly. 
+ 
+    Examples 
+    -------- 
+    &gt;&gt;&gt; num = cycler('a', range(3)) 
+    &gt;&gt;&gt; let = cycler('a', 'abc') 
+    &gt;&gt;&gt; num.concat(let) 
+    cycler('a', [0, 1, 2, 'a', 'b', 'c']) 
+ 
+    Returns 
+    ------- 
+    `Cycler` 
+        The concatenated cycler. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">left.keys != right.keys:</span>
+        <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s3">&quot;Keys do not match:</span><span class="s2">\n</span><span class="s3">&quot;</span>
+                         <span class="s3">&quot;</span><span class="s2">\t</span><span class="s3">Intersection: {both!r}</span><span class="s2">\n</span><span class="s3">&quot;</span>
+                         <span class="s3">&quot;</span><span class="s2">\t</span><span class="s3">Disjoint: {just_one!r}&quot;</span><span class="s1">.format(</span>
+                             <span class="s1">both=left.keys &amp; right.keys</span><span class="s2">,</span>
+                             <span class="s1">just_one=left.keys ^ right.keys))</span>
+    <span class="s1">_l = left.by_key()</span>
+    <span class="s1">_r = right.by_key()</span>
+    <span class="s2">return </span><span class="s1">reduce(add</span><span class="s2">, </span><span class="s1">(_cycler(k</span><span class="s2">, </span><span class="s1">_l[k] + _r[k]) </span><span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s1">left.keys))</span>
+
+
+<span class="s2">class </span><span class="s1">Cycler:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Composable cycles. 
+ 
+    This class has compositions methods: 
+ 
+    ``+`` 
+      for 'inner' products (zip) 
+ 
+    ``+=`` 
+      in-place ``+`` 
+ 
+    ``*`` 
+      for outer products (`itertools.product`) and integer multiplication 
+ 
+    ``*=`` 
+      in-place ``*`` 
+ 
+    and supports basic slicing via ``[]``. 
+ 
+    Parameters 
+    ---------- 
+    left, right : Cycler or None 
+        The 'left' and 'right' cyclers. 
+    op : func or None 
+        Function which composes the 'left' and 'right' cyclers. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__call__(self):</span>
+        <span class="s2">return </span><span class="s1">cycle(self)</span>
+
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">left</span><span class="s2">, </span><span class="s1">right=</span><span class="s2">None, </span><span class="s1">op=</span><span class="s2">None</span><span class="s1">):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Semi-private init. 
+ 
+        Do not use this directly, use `cycler` function instead. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">isinstance(left</span><span class="s2">, </span><span class="s1">Cycler):</span>
+            <span class="s1">self._left = Cycler(left._left</span><span class="s2">, </span><span class="s1">left._right</span><span class="s2">, </span><span class="s1">left._op)</span>
+        <span class="s2">elif </span><span class="s1">left </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s4"># Need to copy the dictionary or else that will be a residual</span>
+            <span class="s4"># mutable that could lead to strange errors</span>
+            <span class="s1">self._left = [copy.copy(v) </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">left]</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s1">self._left = </span><span class="s2">None</span>
+
+        <span class="s2">if </span><span class="s1">isinstance(right</span><span class="s2">, </span><span class="s1">Cycler):</span>
+            <span class="s1">self._right = Cycler(right._left</span><span class="s2">, </span><span class="s1">right._right</span><span class="s2">, </span><span class="s1">right._op)</span>
+        <span class="s2">elif </span><span class="s1">right </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s4"># Need to copy the dictionary or else that will be a residual</span>
+            <span class="s4"># mutable that could lead to strange errors</span>
+            <span class="s1">self._right = [copy.copy(v) </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">right]</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s1">self._right = </span><span class="s2">None</span>
+
+        <span class="s1">self._keys = _process_keys(self._left</span><span class="s2">, </span><span class="s1">self._right)</span>
+        <span class="s1">self._op = op</span>
+
+    <span class="s2">def </span><span class="s1">__contains__(self</span><span class="s2">, </span><span class="s1">k):</span>
+        <span class="s2">return </span><span class="s1">k </span><span class="s2">in </span><span class="s1">self._keys</span>
+
+    <span class="s1">@property</span>
+    <span class="s2">def </span><span class="s1">keys(self):</span>
+        <span class="s0">&quot;&quot;&quot;The keys this Cycler knows about.&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">set(self._keys)</span>
+
+    <span class="s2">def </span><span class="s1">change_key(self</span><span class="s2">, </span><span class="s1">old</span><span class="s2">, </span><span class="s1">new):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Change a key in this cycler to a new name. 
+        Modification is performed in-place. 
+ 
+        Does nothing if the old key is the same as the new key. 
+        Raises a ValueError if the new key is already a key. 
+        Raises a KeyError if the old key isn't a key. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">old == new:</span>
+            <span class="s2">return</span>
+        <span class="s2">if </span><span class="s1">new </span><span class="s2">in </span><span class="s1">self._keys:</span>
+            <span class="s2">raise </span><span class="s1">ValueError(</span>
+                <span class="s3">&quot;Can't replace {old} with {new}, {new} is already a key&quot;</span>
+                <span class="s1">.format(old=old</span><span class="s2">, </span><span class="s1">new=new)</span>
+            <span class="s1">)</span>
+        <span class="s2">if </span><span class="s1">old </span><span class="s2">not in </span><span class="s1">self._keys:</span>
+            <span class="s2">raise </span><span class="s1">KeyError(</span><span class="s3">&quot;Can't replace {old} with {new}, {old} is not a key&quot;</span>
+                           <span class="s1">.format(old=old</span><span class="s2">, </span><span class="s1">new=new))</span>
+
+        <span class="s1">self._keys.remove(old)</span>
+        <span class="s1">self._keys.add(new)</span>
+
+        <span class="s2">if </span><span class="s1">self._right </span><span class="s2">is not None and </span><span class="s1">old </span><span class="s2">in </span><span class="s1">self._right.keys:</span>
+            <span class="s1">self._right.change_key(old</span><span class="s2">, </span><span class="s1">new)</span>
+
+        <span class="s4"># self._left should always be non-None</span>
+        <span class="s4"># if self._keys is non-empty.</span>
+        <span class="s2">elif </span><span class="s1">isinstance(self._left</span><span class="s2">, </span><span class="s1">Cycler):</span>
+            <span class="s1">self._left.change_key(old</span><span class="s2">, </span><span class="s1">new)</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s4"># It should be completely safe at this point to</span>
+            <span class="s4"># assume that the old key can be found in each</span>
+            <span class="s4"># iteration.</span>
+            <span class="s1">self._left = [{new: entry[old]} </span><span class="s2">for </span><span class="s1">entry </span><span class="s2">in </span><span class="s1">self._left]</span>
+
+    <span class="s1">@classmethod</span>
+    <span class="s2">def </span><span class="s1">_from_iter(cls</span><span class="s2">, </span><span class="s1">label</span><span class="s2">, </span><span class="s1">itr):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Class method to create 'base' Cycler objects 
+        that do not have a 'right' or 'op' and for which 
+        the 'left' object is not another Cycler. 
+ 
+        Parameters 
+        ---------- 
+        label : str 
+            The property key. 
+ 
+        itr : iterable 
+            Finite length iterable of the property values. 
+ 
+        Returns 
+        ------- 
+        `Cycler` 
+            New 'base' cycler. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">ret = cls(</span><span class="s2">None</span><span class="s1">)</span>
+        <span class="s1">ret._left = list({label: v} </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">itr)</span>
+        <span class="s1">ret._keys = {label}</span>
+        <span class="s2">return </span><span class="s1">ret</span>
+
+    <span class="s2">def </span><span class="s1">__getitem__(self</span><span class="s2">, </span><span class="s1">key):</span>
+        <span class="s4"># TODO : maybe add numpy style fancy slicing</span>
+        <span class="s2">if </span><span class="s1">isinstance(key</span><span class="s2">, </span><span class="s1">slice):</span>
+            <span class="s1">trans = self.by_key()</span>
+            <span class="s2">return </span><span class="s1">reduce(add</span><span class="s2">, </span><span class="s1">(_cycler(k</span><span class="s2">, </span><span class="s1">v[key]) </span><span class="s2">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">trans.items()))</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s3">&quot;Can only use slices with Cycler.__getitem__&quot;</span><span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">__iter__(self):</span>
+        <span class="s2">if </span><span class="s1">self._right </span><span class="s2">is None</span><span class="s1">:</span>
+            <span class="s2">for </span><span class="s1">left </span><span class="s2">in </span><span class="s1">self._left:</span>
+                <span class="s2">yield </span><span class="s1">dict(left)</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s2">for </span><span class="s1">a</span><span class="s2">, </span><span class="s1">b </span><span class="s2">in </span><span class="s1">self._op(self._left</span><span class="s2">, </span><span class="s1">self._right):</span>
+                <span class="s1">out = {}</span>
+                <span class="s1">out.update(a)</span>
+                <span class="s1">out.update(b)</span>
+                <span class="s2">yield </span><span class="s1">out</span>
+
+    <span class="s2">def </span><span class="s1">__add__(self</span><span class="s2">, </span><span class="s1">other):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Pair-wise combine two equal length cyclers (zip). 
+ 
+        Parameters 
+        ---------- 
+        other : Cycler 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">len(self) != len(other):</span>
+            <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s3">&quot;Can only add equal length cycles, &quot;</span>
+                             <span class="s3">f&quot;not </span><span class="s2">{</span><span class="s1">len(self)</span><span class="s2">} </span><span class="s3">and </span><span class="s2">{</span><span class="s1">len(other)</span><span class="s2">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+        <span class="s2">return </span><span class="s1">Cycler(self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s1">zip)</span>
+
+    <span class="s2">def </span><span class="s1">__mul__(self</span><span class="s2">, </span><span class="s1">other):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Outer product of two cyclers (`itertools.product`) or integer 
+        multiplication. 
+ 
+        Parameters 
+        ---------- 
+        other : Cycler or int 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">isinstance(other</span><span class="s2">, </span><span class="s1">Cycler):</span>
+            <span class="s2">return </span><span class="s1">Cycler(self</span><span class="s2">, </span><span class="s1">other</span><span class="s2">, </span><span class="s1">product)</span>
+        <span class="s2">elif </span><span class="s1">isinstance(other</span><span class="s2">, </span><span class="s1">int):</span>
+            <span class="s1">trans = self.by_key()</span>
+            <span class="s2">return </span><span class="s1">reduce(add</span><span class="s2">, </span><span class="s1">(_cycler(k</span><span class="s2">, </span><span class="s1">v*other) </span><span class="s2">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">trans.items()))</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s1">NotImplemented</span>
+
+    <span class="s2">def </span><span class="s1">__rmul__(self</span><span class="s2">, </span><span class="s1">other):</span>
+        <span class="s2">return </span><span class="s1">self * other</span>
+
+    <span class="s2">def </span><span class="s1">__len__(self):</span>
+        <span class="s1">op_dict = {zip: min</span><span class="s2">, </span><span class="s1">product: mul}</span>
+        <span class="s2">if </span><span class="s1">self._right </span><span class="s2">is None</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s1">len(self._left)</span>
+        <span class="s1">l_len = len(self._left)</span>
+        <span class="s1">r_len = len(self._right)</span>
+        <span class="s2">return </span><span class="s1">op_dict[self._op](l_len</span><span class="s2">, </span><span class="s1">r_len)</span>
+
+    <span class="s2">def </span><span class="s1">__iadd__(self</span><span class="s2">, </span><span class="s1">other):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        In-place pair-wise combine two equal length cyclers (zip). 
+ 
+        Parameters 
+        ---------- 
+        other : Cycler 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if not </span><span class="s1">isinstance(other</span><span class="s2">, </span><span class="s1">Cycler):</span>
+            <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;Cannot += with a non-Cycler object&quot;</span><span class="s1">)</span>
+        <span class="s4"># True shallow copy of self is fine since this is in-place</span>
+        <span class="s1">old_self = copy.copy(self)</span>
+        <span class="s1">self._keys = _process_keys(old_self</span><span class="s2">, </span><span class="s1">other)</span>
+        <span class="s1">self._left = old_self</span>
+        <span class="s1">self._op = zip</span>
+        <span class="s1">self._right = Cycler(other._left</span><span class="s2">, </span><span class="s1">other._right</span><span class="s2">, </span><span class="s1">other._op)</span>
+        <span class="s2">return </span><span class="s1">self</span>
+
+    <span class="s2">def </span><span class="s1">__imul__(self</span><span class="s2">, </span><span class="s1">other):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        In-place outer product of two cyclers (`itertools.product`). 
+ 
+        Parameters 
+        ---------- 
+        other : Cycler 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if not </span><span class="s1">isinstance(other</span><span class="s2">, </span><span class="s1">Cycler):</span>
+            <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;Cannot *= with a non-Cycler object&quot;</span><span class="s1">)</span>
+        <span class="s4"># True shallow copy of self is fine since this is in-place</span>
+        <span class="s1">old_self = copy.copy(self)</span>
+        <span class="s1">self._keys = _process_keys(old_self</span><span class="s2">, </span><span class="s1">other)</span>
+        <span class="s1">self._left = old_self</span>
+        <span class="s1">self._op = product</span>
+        <span class="s1">self._right = Cycler(other._left</span><span class="s2">, </span><span class="s1">other._right</span><span class="s2">, </span><span class="s1">other._op)</span>
+        <span class="s2">return </span><span class="s1">self</span>
+
+    <span class="s2">def </span><span class="s1">__eq__(self</span><span class="s2">, </span><span class="s1">other):</span>
+        <span class="s2">if </span><span class="s1">len(self) != len(other):</span>
+            <span class="s2">return False</span>
+        <span class="s2">if </span><span class="s1">self.keys ^ other.keys:</span>
+            <span class="s2">return False</span>
+        <span class="s2">return </span><span class="s1">all(a == b </span><span class="s2">for </span><span class="s1">a</span><span class="s2">, </span><span class="s1">b </span><span class="s2">in </span><span class="s1">zip(self</span><span class="s2">, </span><span class="s1">other))</span>
+
+    <span class="s2">def </span><span class="s1">__ne__(self</span><span class="s2">, </span><span class="s1">other):</span>
+        <span class="s2">return not </span><span class="s1">(self == other)</span>
+
+    <span class="s1">__hash__ = </span><span class="s2">None</span>
+
+    <span class="s2">def </span><span class="s1">__repr__(self):</span>
+        <span class="s1">op_map = {zip: </span><span class="s3">'+'</span><span class="s2">, </span><span class="s1">product: </span><span class="s3">'*'</span><span class="s1">}</span>
+        <span class="s2">if </span><span class="s1">self._right </span><span class="s2">is None</span><span class="s1">:</span>
+            <span class="s1">lab = self.keys.pop()</span>
+            <span class="s1">itr = list(v[lab] </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">self)</span>
+            <span class="s2">return </span><span class="s3">f&quot;cycler(</span><span class="s2">{</span><span class="s1">lab</span><span class="s2">!r}</span><span class="s3">, </span><span class="s2">{</span><span class="s1">itr</span><span class="s2">!r}</span><span class="s3">)&quot;</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s1">op = op_map.get(self._op</span><span class="s2">, </span><span class="s3">'?'</span><span class="s1">)</span>
+            <span class="s1">msg = </span><span class="s3">&quot;({left!r} {op} {right!r})&quot;</span>
+            <span class="s2">return </span><span class="s1">msg.format(left=self._left</span><span class="s2">, </span><span class="s1">op=op</span><span class="s2">, </span><span class="s1">right=self._right)</span>
+
+    <span class="s2">def </span><span class="s1">_repr_html_(self):</span>
+        <span class="s4"># an table showing the value of each key through a full cycle</span>
+        <span class="s1">output = </span><span class="s3">&quot;&lt;table&gt;&quot;</span>
+        <span class="s1">sorted_keys = sorted(self.keys</span><span class="s2">, </span><span class="s1">key=repr)</span>
+        <span class="s2">for </span><span class="s1">key </span><span class="s2">in </span><span class="s1">sorted_keys:</span>
+            <span class="s1">output += </span><span class="s3">f&quot;&lt;th&gt;</span><span class="s2">{</span><span class="s1">key</span><span class="s2">!r}</span><span class="s3">&lt;/th&gt;&quot;</span>
+        <span class="s2">for </span><span class="s1">d </span><span class="s2">in </span><span class="s1">iter(self):</span>
+            <span class="s1">output += </span><span class="s3">&quot;&lt;tr&gt;&quot;</span>
+            <span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s1">sorted_keys:</span>
+                <span class="s1">output += </span><span class="s3">f&quot;&lt;td&gt;</span><span class="s2">{</span><span class="s1">d[k]</span><span class="s2">!r}</span><span class="s3">&lt;/td&gt;&quot;</span>
+            <span class="s1">output += </span><span class="s3">&quot;&lt;/tr&gt;&quot;</span>
+        <span class="s1">output += </span><span class="s3">&quot;&lt;/table&gt;&quot;</span>
+        <span class="s2">return </span><span class="s1">output</span>
+
+    <span class="s2">def </span><span class="s1">by_key(self):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Values by key. 
+ 
+        This returns the transposed values of the cycler.  Iterating 
+        over a `Cycler` yields dicts with a single value for each key, 
+        this method returns a `dict` of `list` which are the values 
+        for the given key. 
+ 
+        The returned value can be used to create an equivalent `Cycler` 
+        using only `+`. 
+ 
+        Returns 
+        ------- 
+        transpose : dict 
+            dict of lists of the values for each key. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s4"># TODO : sort out if this is a bottle neck, if there is a better way</span>
+        <span class="s4"># and if we care.</span>
+
+        <span class="s1">keys = self.keys</span>
+        <span class="s1">out = {k: list() </span><span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s1">keys}</span>
+
+        <span class="s2">for </span><span class="s1">d </span><span class="s2">in </span><span class="s1">self:</span>
+            <span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s1">keys:</span>
+                <span class="s1">out[k].append(d[k])</span>
+        <span class="s2">return </span><span class="s1">out</span>
+
+    <span class="s4"># for back compatibility</span>
+    <span class="s1">_transpose = by_key</span>
+
+    <span class="s2">def </span><span class="s1">simplify(self):</span>
+        <span class="s0">&quot;&quot;&quot; 
+        Simplify the cycler into a sum (but no products) of cyclers. 
+ 
+        Returns 
+        ------- 
+        simple : Cycler 
+        &quot;&quot;&quot;</span>
+        <span class="s4"># TODO: sort out if it is worth the effort to make sure this is</span>
+        <span class="s4"># balanced.  Currently it is is</span>
+        <span class="s4"># (((a + b) + c) + d) vs</span>
+        <span class="s4"># ((a + b) + (c + d))</span>
+        <span class="s4"># I would believe that there is some performance implications</span>
+        <span class="s1">trans = self.by_key()</span>
+        <span class="s2">return </span><span class="s1">reduce(add</span><span class="s2">, </span><span class="s1">(_cycler(k</span><span class="s2">, </span><span class="s1">v) </span><span class="s2">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">trans.items()))</span>
+
+    <span class="s1">concat = concat</span>
+
+
+<span class="s2">def </span><span class="s1">cycler(*args</span><span class="s2">, </span><span class="s1">**kwargs):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Create a new `Cycler` object from a single positional argument, 
+    a pair of positional arguments, or the combination of keyword arguments. 
+ 
+    cycler(arg) 
+    cycler(label1=itr1[, label2=iter2[, ...]]) 
+    cycler(label, itr) 
+ 
+    Form 1 simply copies a given `Cycler` object. 
+ 
+    Form 2 composes a `Cycler` as an inner product of the 
+    pairs of keyword arguments. In other words, all of the 
+    iterables are cycled simultaneously, as if through zip(). 
+ 
+    Form 3 creates a `Cycler` from a label and an iterable. 
+    This is useful for when the label cannot be a keyword argument 
+    (e.g., an integer or a name that has a space in it). 
+ 
+    Parameters 
+    ---------- 
+    arg : Cycler 
+        Copy constructor for Cycler (does a shallow copy of iterables). 
+    label : name 
+        The property key. In the 2-arg form of the function, 
+        the label can be any hashable object. In the keyword argument 
+        form of the function, it must be a valid python identifier. 
+    itr : iterable 
+        Finite length iterable of the property values. 
+        Can be a single-property `Cycler` that would 
+        be like a key change, but as a shallow copy. 
+ 
+    Returns 
+    ------- 
+    cycler : Cycler 
+        New `Cycler` for the given property 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">args </span><span class="s2">and </span><span class="s1">kwargs:</span>
+        <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;cyl() can only accept positional OR keyword &quot;</span>
+                        <span class="s3">&quot;arguments -- not both.&quot;</span><span class="s1">)</span>
+
+    <span class="s2">if </span><span class="s1">len(args) == </span><span class="s5">1</span><span class="s1">:</span>
+        <span class="s2">if not </span><span class="s1">isinstance(args[</span><span class="s5">0</span><span class="s1">]</span><span class="s2">, </span><span class="s1">Cycler):</span>
+            <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;If only one positional argument given, it must &quot;</span>
+                            <span class="s3">&quot;be a Cycler instance.&quot;</span><span class="s1">)</span>
+        <span class="s2">return </span><span class="s1">Cycler(args[</span><span class="s5">0</span><span class="s1">])</span>
+    <span class="s2">elif </span><span class="s1">len(args) == </span><span class="s5">2</span><span class="s1">:</span>
+        <span class="s2">return </span><span class="s1">_cycler(*args)</span>
+    <span class="s2">elif </span><span class="s1">len(args) &gt; </span><span class="s5">2</span><span class="s1">:</span>
+        <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;Only a single Cycler can be accepted as the lone &quot;</span>
+                        <span class="s3">&quot;positional argument. Use keyword arguments instead.&quot;</span><span class="s1">)</span>
+
+    <span class="s2">if </span><span class="s1">kwargs:</span>
+        <span class="s2">return </span><span class="s1">reduce(add</span><span class="s2">, </span><span class="s1">(_cycler(k</span><span class="s2">, </span><span class="s1">v) </span><span class="s2">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">kwargs.items()))</span>
+
+    <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;Must have at least a positional OR keyword arguments&quot;</span><span class="s1">)</span>
+
+
+<span class="s2">def </span><span class="s1">_cycler(label</span><span class="s2">, </span><span class="s1">itr):</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Create a new `Cycler` object from a property name and iterable of values. 
+ 
+    Parameters 
+    ---------- 
+    label : hashable 
+        The property key. 
+    itr : iterable 
+        Finite length iterable of the property values. 
+ 
+    Returns 
+    ------- 
+    cycler : Cycler 
+        New `Cycler` for the given property 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">isinstance(itr</span><span class="s2">, </span><span class="s1">Cycler):</span>
+        <span class="s1">keys = itr.keys</span>
+        <span class="s2">if </span><span class="s1">len(keys) != </span><span class="s5">1</span><span class="s1">:</span>
+            <span class="s1">msg = </span><span class="s3">&quot;Can not create Cycler from a multi-property Cycler&quot;</span>
+            <span class="s2">raise </span><span class="s1">ValueError(msg)</span>
+
+        <span class="s1">lab = keys.pop()</span>
+        <span class="s4"># Doesn't need to be a new list because</span>
+        <span class="s4"># _from_iter() will be creating that new list anyway.</span>
+        <span class="s1">itr = (v[lab] </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">itr)</span>
+
+    <span class="s2">return </span><span class="s1">Cycler._from_iter(label</span><span class="s2">, </span><span class="s1">itr)</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,91 @@
+<html>
+<head>
+<title>main.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #6897bb;}
+.s3 { color: #6a8759;}
+.s4 { color: #808080;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+main.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">cv2</span>
+<span class="s0">from </span><span class="s1">cvzone.HandTrackingModule </span><span class="s0">import </span><span class="s1">HandDetector</span>
+<span class="s0">from </span><span class="s1">cvzone.ClassificationModule </span><span class="s0">import </span><span class="s1">Classifier</span>
+<span class="s0">import </span><span class="s1">numpy </span><span class="s0">as </span><span class="s1">np</span>
+<span class="s0">import </span><span class="s1">math</span>
+<span class="s0">import </span><span class="s1">time</span>
+
+<span class="s1">cap = cv2.VideoCapture(</span><span class="s2">0</span><span class="s1">)</span>
+<span class="s1">detector = HandDetector(maxHands=</span><span class="s2">1</span><span class="s1">)</span>
+<span class="s1">classifier = Classifier(</span><span class="s3">&quot;Model/keras_model.h5&quot;</span><span class="s0">, </span><span class="s3">&quot;Model/labels.txt&quot;</span><span class="s1">)</span>
+<span class="s1">offset = </span><span class="s2">20</span>
+<span class="s1">imgSize = </span><span class="s2">300</span>
+<span class="s1">counter = </span><span class="s2">0</span>
+
+<span class="s1">folder = </span><span class="s3">&quot;Data/ok&quot;</span>
+<span class="s1">labels = [</span><span class="s3">&quot;dislike&quot;</span><span class="s0">, </span><span class="s3">&quot;good_job&quot;</span><span class="s0">, </span><span class="s3">&quot;good_luck&quot;</span><span class="s0">, </span><span class="s3">&quot;hi&quot;</span><span class="s0">, </span><span class="s3">&quot;ok&quot;</span><span class="s0">, </span><span class="s3">&quot;peace&quot;</span><span class="s0">, </span><span class="s3">&quot;rock&quot;</span><span class="s0">, </span><span class="s3">&quot;you&quot;</span><span class="s1">]</span>
+
+<span class="s0">while True</span><span class="s1">:</span>
+    <span class="s1">success</span><span class="s0">, </span><span class="s1">img = cap.read()</span>
+    <span class="s1">imgOutput = img.copy()</span>
+    <span class="s1">hands</span><span class="s0">, </span><span class="s1">img = detector.findHands(img)</span>
+    <span class="s0">if </span><span class="s1">hands:</span>
+        <span class="s1">hand = hands[</span><span class="s2">0</span><span class="s1">]</span>
+        <span class="s1">x</span><span class="s0">, </span><span class="s1">y</span><span class="s0">, </span><span class="s1">w</span><span class="s0">, </span><span class="s1">h = hand[</span><span class="s3">'bbox'</span><span class="s1">]</span>
+
+        <span class="s4"># gave us a white background for our camera</span>
+        <span class="s1">imgWhite = np.ones((imgSize</span><span class="s0">, </span><span class="s1">imgSize</span><span class="s0">, </span><span class="s2">3</span><span class="s1">)</span><span class="s0">, </span><span class="s1">np.uint8)*</span><span class="s2">255</span>
+
+        <span class="s4"># Image cropping</span>
+        <span class="s1">imgCrop = img[y-offset:y + h+offset</span><span class="s0">, </span><span class="s1">x-offset:x +w+ offset]</span>
+        <span class="s1">imgCropShape = imgCrop.shape</span>
+
+        <span class="s1">aspectRatio = h/w</span>
+
+        <span class="s4"># Calculate height and width</span>
+        <span class="s0">if </span><span class="s1">aspectRatio &gt; </span><span class="s2">1</span><span class="s1">:</span>
+            <span class="s4"># if height higher than width then gave us a aspect ratio of vertical view and center it</span>
+            <span class="s1">k = imgSize/h</span>
+            <span class="s1">wCal = math.ceil(k*w)</span>
+            <span class="s1">imgResize = cv2.resize(imgCrop</span><span class="s0">, </span><span class="s1">(wCal</span><span class="s0">, </span><span class="s1">imgSize))</span>
+            <span class="s1">imgResizeShape = imgResize.shape</span>
+            <span class="s1">wGap = math.ceil((imgSize-wCal) / </span><span class="s2">2</span><span class="s1">)</span>
+            <span class="s1">imgWhite[:</span><span class="s0">, </span><span class="s1">wGap:wCal+wGap] = imgResize</span>
+            <span class="s4"># this will give us prediction of the image that we created before</span>
+            <span class="s1">prediction</span><span class="s0">, </span><span class="s1">index = classifier.getPrediction(imgWhite</span><span class="s0">,</span><span class="s1">draw=</span><span class="s0">False</span><span class="s1">)</span>
+            <span class="s4">#print(prediction, index)</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s4"># if width is higher than height then gave us a aspect ratio of horizontal view and center it</span>
+            <span class="s1">k = imgSize / w</span>
+            <span class="s1">hCal = math.ceil(k * h)</span>
+            <span class="s1">imgResize = cv2.resize(imgCrop</span><span class="s0">, </span><span class="s1">(imgSize</span><span class="s0">, </span><span class="s1">hCal))</span>
+            <span class="s1">imgResizeShape = imgResize.shape</span>
+            <span class="s1">hGap = math.ceil((imgSize - hCal) / </span><span class="s2">2</span><span class="s1">)</span>
+            <span class="s1">imgWhite[hGap:hCal + hGap</span><span class="s0">, </span><span class="s1">:] = imgResize</span>
+            <span class="s4"># this will give us prediction of the image that we created before</span>
+            <span class="s1">prediction</span><span class="s0">, </span><span class="s1">index = classifier.getPrediction(imgWhite</span><span class="s0">,</span><span class="s1">draw=</span><span class="s0">False</span><span class="s1">)</span>
+
+        <span class="s1">cv2.rectangle(imgOutput</span><span class="s0">, </span><span class="s1">(x - offset</span><span class="s0">, </span><span class="s1">y - offset - </span><span class="s2">40</span><span class="s1">)</span><span class="s0">,</span>
+                      <span class="s1">(x - offset + </span><span class="s2">120</span><span class="s0">, </span><span class="s1">y - offset - </span><span class="s2">100</span><span class="s1">+ </span><span class="s2">100</span><span class="s1">)</span><span class="s0">, </span><span class="s1">(</span><span class="s2">255</span><span class="s0">, </span><span class="s2">0</span><span class="s0">, </span><span class="s2">255</span><span class="s1">)</span><span class="s0">, </span><span class="s1">cv2.FILLED)</span>
+        <span class="s1">cv2.putText(imgOutput</span><span class="s0">,</span><span class="s1">labels[index]</span><span class="s0">,</span><span class="s1">(x</span><span class="s0">,</span><span class="s1">y-</span><span class="s2">30</span><span class="s1">)</span><span class="s0">, </span><span class="s1">cv2.FONT_HERSHEY_COMPLEX</span><span class="s0">, </span><span class="s2">1</span><span class="s0">, </span><span class="s1">(</span><span class="s2">255</span><span class="s0">,</span><span class="s2">255</span><span class="s0">,</span><span class="s2">255</span><span class="s1">)</span><span class="s0">, </span><span class="s2">2</span><span class="s1">)</span>
+        <span class="s1">cv2.rectangle(imgOutput</span><span class="s0">, </span><span class="s1">(x-offset</span><span class="s0">,</span><span class="s1">y-offset )</span><span class="s0">, </span><span class="s1">(x+w+ offset</span><span class="s0">, </span><span class="s1">y+h+offset)</span><span class="s0">, </span><span class="s1">(</span><span class="s2">255</span><span class="s0">,</span><span class="s2">0</span><span class="s0">,</span><span class="s2">255</span><span class="s1">)</span><span class="s0">, </span><span class="s2">4</span><span class="s1">)</span>
+
+        <span class="s1">print(labels[index])</span>
+        <span class="s4"># this will show the camera</span>
+        <span class="s4">#cv2.imshow(&quot;Camera02&quot;, imgCrop)</span>
+        <span class="s4">#cv2.imshow(&quot;Camera03&quot;, imgWhite)</span>
+
+
+    <span class="s1">cv2.imshow(</span><span class="s3">&quot;Camera01&quot;</span><span class="s0">, </span><span class="s1">imgOutput)</span>
+    <span class="s1">cv2.waitKey(</span><span class="s2">1</span><span class="s1">)</span>
+</pre>
+</body>
+</html>

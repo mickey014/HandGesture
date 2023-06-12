@@ -1,0 +1,129 @@
+<html>
+<head>
+<title>collect_profile.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+collect_profile.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright 2022 The JAX Authors.</span>
+<span class="s0">#</span>
+<span class="s0"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="s0"># you may not use this file except in compliance with the License.</span>
+<span class="s0"># You may obtain a copy of the License at</span>
+<span class="s0">#</span>
+<span class="s0">#     https://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="s0">#</span>
+<span class="s0"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="s0"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="s0"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="s0"># See the License for the specific language governing permissions and</span>
+<span class="s0"># limitations under the License.</span>
+<span class="s2">import </span><span class="s1">argparse</span>
+<span class="s2">import </span><span class="s1">gzip</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">pathlib</span>
+<span class="s2">import </span><span class="s1">tempfile</span>
+
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">Optional</span>
+
+<span class="s0"># pytype: disable=import-error</span>
+<span class="s2">from </span><span class="s1">jax._src </span><span class="s2">import </span><span class="s1">profiler </span><span class="s2">as </span><span class="s1">jax_profiler</span>
+<span class="s2">try</span><span class="s1">:</span>
+  <span class="s2">from </span><span class="s1">tensorflow.python.profiler </span><span class="s2">import </span><span class="s1">profiler_v2 </span><span class="s2">as </span><span class="s1">profiler</span>
+  <span class="s2">from </span><span class="s1">tensorflow.python.profiler </span><span class="s2">import </span><span class="s1">profiler_client</span>
+<span class="s2">except </span><span class="s1">ImportError:</span>
+  <span class="s2">raise </span><span class="s1">ImportError(</span><span class="s3">&quot;This script requires `tensorflow` to be installed.&quot;</span><span class="s1">)</span>
+<span class="s2">try</span><span class="s1">:</span>
+  <span class="s2">from </span><span class="s1">tensorboard_plugin_profile.convert </span><span class="s2">import </span><span class="s1">raw_to_tool_data </span><span class="s2">as </span><span class="s1">convert</span>
+<span class="s2">except </span><span class="s1">ImportError:</span>
+  <span class="s2">raise </span><span class="s1">ImportError(</span>
+      <span class="s3">&quot;This script requires `tensorboard_plugin_profile` to be installed.&quot;</span><span class="s1">)</span>
+<span class="s0"># pytype: enable=import-error</span>
+
+
+<span class="s1">_DESCRIPTION = </span><span class="s3">&quot;&quot;&quot; 
+To profile running JAX programs, you first need to start the profiler server 
+in the program of interest. You can do this via 
+`jax.profiler.start_server(&lt;port&gt;)`. Once the program is running and the 
+profiler server has started, you can run `collect_profile` to trace the execution 
+for a provided duration. The trace file will be dumped into a directory 
+(determined by `--log_dir`) and by default, a Perfetto UI link will be generated 
+to view the resulting trace. 
+&quot;&quot;&quot;</span>
+<span class="s1">parser = argparse.ArgumentParser(description=_DESCRIPTION)</span>
+<span class="s1">parser.add_argument(</span><span class="s3">&quot;--log_dir&quot;</span><span class="s2">, </span><span class="s1">default=</span><span class="s2">None,</span>
+                    <span class="s1">help=(</span><span class="s3">&quot;Directory to store log files. &quot;</span>
+                          <span class="s3">&quot;Uses a temporary directory if none provided.&quot;</span><span class="s1">)</span><span class="s2">,</span>
+                    <span class="s1">type=str)</span>
+<span class="s1">parser.add_argument(</span><span class="s3">&quot;port&quot;</span><span class="s2">, </span><span class="s1">help=</span><span class="s3">&quot;Port to collect trace&quot;</span><span class="s2">, </span><span class="s1">type=int)</span>
+<span class="s1">parser.add_argument(</span><span class="s3">&quot;duration_in_ms&quot;</span><span class="s2">,</span>
+                    <span class="s1">help=</span><span class="s3">&quot;Duration to collect trace in milliseconds&quot;</span><span class="s2">, </span><span class="s1">type=int)</span>
+<span class="s1">parser.add_argument(</span><span class="s3">&quot;--no_perfetto_link&quot;</span><span class="s2">,</span>
+                    <span class="s1">help=</span><span class="s3">&quot;Disable creating a perfetto link&quot;</span><span class="s2">,</span>
+                    <span class="s1">action=</span><span class="s3">&quot;store_true&quot;</span><span class="s1">)</span>
+<span class="s1">parser.add_argument(</span><span class="s3">&quot;--host&quot;</span><span class="s2">, </span><span class="s1">default=</span><span class="s3">&quot;127.0.0.1&quot;</span><span class="s2">,</span>
+                    <span class="s1">help=</span><span class="s3">&quot;Host to collect trace. Defaults to 127.0.0.1&quot;</span><span class="s2">,</span>
+                    <span class="s1">type=str)</span>
+<span class="s1">parser.add_argument(</span><span class="s3">&quot;--host_tracer_level&quot;</span><span class="s2">, </span><span class="s1">default=</span><span class="s4">2</span><span class="s2">,</span>
+                    <span class="s1">help=</span><span class="s3">&quot;Profiler host tracer level&quot;</span><span class="s2">, </span><span class="s1">type=int)</span>
+<span class="s1">parser.add_argument(</span><span class="s3">&quot;--device_tracer_level&quot;</span><span class="s2">, </span><span class="s1">default=</span><span class="s4">1</span><span class="s2">,</span>
+                    <span class="s1">help=</span><span class="s3">&quot;Profiler device tracer level&quot;</span><span class="s2">, </span><span class="s1">type=int)</span>
+<span class="s1">parser.add_argument(</span><span class="s3">&quot;--python_tracer_level&quot;</span><span class="s2">, </span><span class="s1">default=</span><span class="s4">1</span><span class="s2">,</span>
+                    <span class="s1">help=</span><span class="s3">&quot;Profiler Python tracer level&quot;</span><span class="s2">, </span><span class="s1">type=int)</span>
+
+<span class="s2">def </span><span class="s1">collect_profile(port: int</span><span class="s2">, </span><span class="s1">duration_in_ms: int</span><span class="s2">, </span><span class="s1">host: str</span><span class="s2">,</span>
+                    <span class="s1">log_dir: Optional[str]</span><span class="s2">, </span><span class="s1">host_tracer_level: int</span><span class="s2">,</span>
+                    <span class="s1">device_tracer_level: int</span><span class="s2">, </span><span class="s1">python_tracer_level: int</span><span class="s2">,</span>
+                    <span class="s1">no_perfetto_link: bool):</span>
+  <span class="s1">options = profiler.ProfilerOptions(</span>
+      <span class="s1">host_tracer_level=host_tracer_level</span><span class="s2">,</span>
+      <span class="s1">device_tracer_level=device_tracer_level</span><span class="s2">,</span>
+      <span class="s1">python_tracer_level=python_tracer_level</span><span class="s2">,</span>
+  <span class="s1">)</span>
+  <span class="s1">log_dir_ = pathlib.Path(log_dir </span><span class="s2">if </span><span class="s1">log_dir </span><span class="s2">is not None else </span><span class="s1">tempfile.mkdtemp())</span>
+  <span class="s1">profiler_client.trace(</span>
+      <span class="s3">f&quot;</span><span class="s2">{</span><span class="s1">host</span><span class="s2">}</span><span class="s3">:</span><span class="s2">{</span><span class="s1">port</span><span class="s2">}</span><span class="s3">&quot;</span><span class="s2">,</span>
+      <span class="s1">str(log_dir_)</span><span class="s2">,</span>
+      <span class="s1">duration_in_ms</span><span class="s2">,</span>
+      <span class="s1">options=options)</span>
+  <span class="s1">print(</span><span class="s3">f&quot;Dumped profiling information in: </span><span class="s2">{</span><span class="s1">log_dir_</span><span class="s2">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+  <span class="s0"># The profiler dumps `xplane.pb` to the logging directory. To upload it to</span>
+  <span class="s0"># the Perfetto trace viewer, we need to convert it to a `trace.json` file.</span>
+  <span class="s0"># We do this by first finding the `xplane.pb` file, then passing it into</span>
+  <span class="s0"># tensorflow_profile_plugin's `xplane` conversion function.</span>
+  <span class="s1">curr_path = log_dir_.resolve()</span>
+  <span class="s1">root_trace_folder = curr_path / </span><span class="s3">&quot;plugins&quot; </span><span class="s1">/ </span><span class="s3">&quot;profile&quot;</span>
+  <span class="s1">trace_folders = [root_trace_folder / trace_folder </span><span class="s2">for </span><span class="s1">trace_folder</span>
+                   <span class="s2">in </span><span class="s1">root_trace_folder.iterdir()]</span>
+  <span class="s1">latest_folder = max(trace_folders</span><span class="s2">, </span><span class="s1">key=os.path.getmtime)</span>
+  <span class="s1">xplane = next(latest_folder.glob(</span><span class="s3">&quot;*.xplane.pb&quot;</span><span class="s1">))</span>
+  <span class="s1">result</span><span class="s2">, </span><span class="s1">_ = convert.xspace_to_tool_data([xplane]</span><span class="s2">, </span><span class="s3">&quot;trace_viewer^&quot;</span><span class="s2">, </span><span class="s1">{})</span>
+
+  <span class="s2">with </span><span class="s1">gzip.open(str(latest_folder / </span><span class="s3">&quot;remote.trace.json.gz&quot;</span><span class="s1">)</span><span class="s2">, </span><span class="s3">&quot;wb&quot;</span><span class="s1">) </span><span class="s2">as </span><span class="s1">fp:</span>
+    <span class="s1">fp.write(result.encode(</span><span class="s3">&quot;utf-8&quot;</span><span class="s1">))</span>
+
+  <span class="s2">if not </span><span class="s1">no_perfetto_link:</span>
+    <span class="s1">path = jax_profiler._write_perfetto_trace_file(str(log_dir_))</span>
+    <span class="s1">jax_profiler._host_perfetto_trace_file(path)</span>
+
+<span class="s2">def </span><span class="s1">main(args):</span>
+  <span class="s1">collect_profile(args.port</span><span class="s2">, </span><span class="s1">args.duration_in_ms</span><span class="s2">, </span><span class="s1">args.host</span><span class="s2">, </span><span class="s1">args.log_dir</span><span class="s2">,</span>
+                  <span class="s1">args.host_tracer_level</span><span class="s2">, </span><span class="s1">args.device_tracer_level</span><span class="s2">,</span>
+                  <span class="s1">args.python_tracer_level</span><span class="s2">, </span><span class="s1">args.no_perfetto_link)</span>
+
+<span class="s2">if </span><span class="s1">__name__ == </span><span class="s3">&quot;__main__&quot;</span><span class="s1">:</span>
+  <span class="s1">main(parser.parse_args())</span>
+</pre>
+</body>
+</html>

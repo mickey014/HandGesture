@@ -1,0 +1,757 @@
+<html>
+<head>
+<title>array.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #629755; font-style: italic;}
+.s4 { color: #6a8759;}
+.s5 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+array.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright 2021 The JAX Authors.</span>
+<span class="s0">#</span>
+<span class="s0"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="s0"># you may not use this file except in compliance with the License.</span>
+<span class="s0"># You may obtain a copy of the License at</span>
+<span class="s0">#</span>
+<span class="s0">#     https://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="s0">#</span>
+<span class="s0"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="s0"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="s0"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="s0"># See the License for the specific language governing permissions and</span>
+<span class="s0"># limitations under the License.</span>
+
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">math</span>
+<span class="s2">import </span><span class="s1">operator </span><span class="s2">as </span><span class="s1">op</span>
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+<span class="s2">import </span><span class="s1">functools</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">(Any</span><span class="s2">, </span><span class="s1">Callable</span><span class="s2">, </span><span class="s1">List</span><span class="s2">, </span><span class="s1">Optional</span><span class="s2">, </span><span class="s1">Sequence</span><span class="s2">, </span><span class="s1">Set</span><span class="s2">, </span><span class="s1">Tuple</span><span class="s2">,</span>
+                    <span class="s1">Union</span><span class="s2">, </span><span class="s1">cast</span><span class="s2">, </span><span class="s1">TYPE_CHECKING)</span>
+
+<span class="s2">from </span><span class="s1">jax._src </span><span class="s2">import </span><span class="s1">abstract_arrays</span>
+<span class="s2">from </span><span class="s1">jax._src </span><span class="s2">import </span><span class="s1">api</span>
+<span class="s2">from </span><span class="s1">jax._src </span><span class="s2">import </span><span class="s1">api_util</span>
+<span class="s2">from </span><span class="s1">jax._src </span><span class="s2">import </span><span class="s1">basearray</span>
+<span class="s2">from </span><span class="s1">jax._src </span><span class="s2">import </span><span class="s1">core</span>
+<span class="s2">from </span><span class="s1">jax._src </span><span class="s2">import </span><span class="s1">dispatch</span>
+<span class="s2">from </span><span class="s1">jax._src </span><span class="s2">import </span><span class="s1">dtypes</span>
+<span class="s2">from </span><span class="s1">jax._src </span><span class="s2">import </span><span class="s1">profiler</span>
+<span class="s2">from </span><span class="s1">jax._src </span><span class="s2">import </span><span class="s1">xla_bridge</span>
+<span class="s2">from </span><span class="s1">jax._src.config </span><span class="s2">import </span><span class="s1">config</span>
+<span class="s2">from </span><span class="s1">jax._src.lib </span><span class="s2">import </span><span class="s1">xla_client </span><span class="s2">as </span><span class="s1">xc</span>
+<span class="s2">from </span><span class="s1">jax._src.interpreters </span><span class="s2">import </span><span class="s1">mlir</span>
+<span class="s2">from </span><span class="s1">jax._src.interpreters </span><span class="s2">import </span><span class="s1">pxla</span>
+<span class="s2">from </span><span class="s1">jax._src.interpreters </span><span class="s2">import </span><span class="s1">xla</span>
+<span class="s2">from </span><span class="s1">jax._src.sharding </span><span class="s2">import </span><span class="s1">Sharding</span>
+<span class="s2">from </span><span class="s1">jax._src.sharding_impls </span><span class="s2">import </span><span class="s1">(</span>
+    <span class="s1">SingleDeviceSharding</span><span class="s2">, </span><span class="s1">XLACompatibleSharding</span><span class="s2">, </span><span class="s1">PmapSharding</span><span class="s2">,</span>
+    <span class="s1">device_replica_id_map</span><span class="s2">, </span><span class="s1">hashed_index)</span>
+<span class="s2">from </span><span class="s1">jax._src.typing </span><span class="s2">import </span><span class="s1">ArrayLike</span>
+<span class="s2">from </span><span class="s1">jax._src.util </span><span class="s2">import </span><span class="s1">use_cpp_class</span><span class="s2">, </span><span class="s1">use_cpp_method</span>
+
+<span class="s1">Shape = Tuple[int</span><span class="s2">, </span><span class="s1">...]</span>
+<span class="s1">Device = xc.Device</span>
+<span class="s1">Index = Tuple[slice</span><span class="s2">, </span><span class="s1">...]</span>
+<span class="s1">PRNGKeyArrayImpl = Any  </span><span class="s0"># TODO(jakevdp): fix cycles and import this.</span>
+
+
+<span class="s2">class </span><span class="s1">Shard:</span>
+  <span class="s3">&quot;&quot;&quot;A single data shard of an Array. 
+ 
+  Attributes: 
+    device : Which device this shard resides on. 
+    index : The index into the global array of this shard. 
+    replica_id : Integer id indicating which replica of the global array this 
+      shard is part of. Always 0 for fully sharded data 
+      (i.e. when there’s only 1 replica). 
+    data : The data of this shard. None if ``device`` is non-local. 
+  &quot;&quot;&quot;</span>
+
+  <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">device: Device</span><span class="s2">, </span><span class="s1">sharding: Sharding</span><span class="s2">, </span><span class="s1">global_shape: Shape</span><span class="s2">,</span>
+               <span class="s1">data: Union[</span><span class="s2">None, </span><span class="s1">ArrayImpl</span><span class="s2">, </span><span class="s1">PRNGKeyArrayImpl] = </span><span class="s2">None</span><span class="s1">):</span>
+    <span class="s1">self._device = device</span>
+    <span class="s1">self._sharding = sharding</span>
+    <span class="s1">self._global_shape = global_shape</span>
+    <span class="s1">self._data = data</span>
+
+  <span class="s2">def </span><span class="s1">__repr__(self):</span>
+    <span class="s2">try</span><span class="s1">:</span>
+      <span class="s2">return </span><span class="s1">(</span><span class="s4">f'Shard(device=</span><span class="s2">{</span><span class="s1">repr(self.device)</span><span class="s2">}</span><span class="s4">, index=</span><span class="s2">{</span><span class="s1">self.index</span><span class="s2">}</span><span class="s4">, '</span>
+              <span class="s4">f'replica_id=</span><span class="s2">{</span><span class="s1">self.replica_id</span><span class="s2">}</span><span class="s4">, data=</span><span class="s2">{</span><span class="s1">self.data</span><span class="s2">}</span><span class="s4">)'</span><span class="s1">)</span>
+    <span class="s2">except </span><span class="s1">ValueError:</span>
+      <span class="s2">return </span><span class="s4">f'Shard(device=</span><span class="s2">{</span><span class="s1">repr(self.device)</span><span class="s2">}</span><span class="s4">, data=</span><span class="s2">{</span><span class="s1">self.data</span><span class="s2">}</span><span class="s4">)'</span>
+
+  <span class="s1">@functools.cached_property</span>
+  <span class="s2">def </span><span class="s1">index(self) -&gt; Index:</span>
+    <span class="s2">try</span><span class="s1">:</span>
+      <span class="s1">device_indices_map_fn = self._sharding.devices_indices_map</span>
+    <span class="s2">except </span><span class="s1">AttributeError:</span>
+      <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s4">'Cannot calculate indices from sharding: '</span>
+                       <span class="s4">f'</span><span class="s2">{</span><span class="s1">self._sharding</span><span class="s2">}</span><span class="s4">. Please create a device to index '</span>
+                       <span class="s4">'mapping for your sharding.'</span><span class="s1">) </span><span class="s2">from None</span>
+    <span class="s1">index = device_indices_map_fn(self._global_shape)[self.device]</span>
+    <span class="s2">assert </span><span class="s1">index </span><span class="s2">is not None</span>
+    <span class="s2">return </span><span class="s1">index</span>
+
+  <span class="s1">@functools.cached_property</span>
+  <span class="s2">def </span><span class="s1">replica_id(self) -&gt; int:</span>
+    <span class="s2">return </span><span class="s1">device_replica_id_map(self._sharding</span><span class="s2">, </span><span class="s1">self._global_shape)[self.device]</span>
+
+  <span class="s1">@property</span>
+  <span class="s2">def </span><span class="s1">device(self):</span>
+    <span class="s2">return </span><span class="s1">self._device</span>
+
+  <span class="s1">@property</span>
+  <span class="s2">def </span><span class="s1">data(self):</span>
+    <span class="s2">return </span><span class="s1">self._data</span>
+
+
+<span class="s2">def </span><span class="s1">_reconstruct_array(fun</span><span class="s2">, </span><span class="s1">args</span><span class="s2">, </span><span class="s1">arr_state</span><span class="s2">, </span><span class="s1">aval_state):</span>
+  <span class="s3">&quot;&quot;&quot;Method to reconstruct a device array from a serialized state.&quot;&quot;&quot;</span>
+  <span class="s1">np_value = fun(*args)</span>
+  <span class="s1">np_value.__setstate__(arr_state)</span>
+  <span class="s1">jnp_value = api.device_put(np_value)</span>
+  <span class="s1">jnp_value.aval = jnp_value.aval.update(**aval_state)</span>
+  <span class="s2">return </span><span class="s1">jnp_value</span>
+
+
+<span class="s1">@functools.lru_cache(maxsize=</span><span class="s5">4096</span><span class="s1">)</span>
+<span class="s2">def </span><span class="s1">_cached_index_calc(s</span><span class="s2">, </span><span class="s1">shape):</span>
+  <span class="s1">map_ = s.addressable_devices_indices_map(shape)</span>
+  <span class="s1">seen_h_indices = set()</span>
+  <span class="s1">m = {}</span>
+  <span class="s2">for </span><span class="s1">d</span><span class="s2">, </span><span class="s1">index </span><span class="s2">in </span><span class="s1">map_.items():</span>
+    <span class="s1">h_index = hashed_index(index)</span>
+    <span class="s2">if </span><span class="s1">h_index </span><span class="s2">not in </span><span class="s1">seen_h_indices:</span>
+      <span class="s1">seen_h_indices.add(h_index)</span>
+      <span class="s1">m[d] = index</span>
+  <span class="s2">return </span><span class="s1">m</span>
+
+
+<span class="s2">def </span><span class="s1">_create_copy_plan(arrays</span><span class="s2">, </span><span class="s1">s: Sharding</span><span class="s2">, </span><span class="s1">shape: Shape):</span>
+  <span class="s1">di_map = _cached_index_calc(s</span><span class="s2">, </span><span class="s1">shape)</span>
+  <span class="s1">copy_plan = []</span>
+  <span class="s2">for </span><span class="s1">a </span><span class="s2">in </span><span class="s1">arrays:</span>
+    <span class="s1">ind = di_map.get(a.device()</span><span class="s2">, None</span><span class="s1">)</span>
+    <span class="s2">if </span><span class="s1">ind </span><span class="s2">is not None</span><span class="s1">:</span>
+      <span class="s1">copy_plan.append((ind</span><span class="s2">, </span><span class="s1">a))</span>
+  <span class="s2">return </span><span class="s1">copy_plan</span>
+
+
+<span class="s1">@functools.lru_cache(maxsize=</span><span class="s5">4096</span><span class="s1">)</span>
+<span class="s2">def </span><span class="s1">_process_has_full_value_in_mcjax(s</span><span class="s2">, </span><span class="s1">shape):</span>
+  <span class="s0"># Return False for single host as a fast path.</span>
+  <span class="s2">if </span><span class="s1">xla_bridge.process_count() == </span><span class="s5">1</span><span class="s1">:</span>
+    <span class="s2">return False</span>
+
+  <span class="s1">num_unique_indices = len(</span>
+      <span class="s1">set(hashed_index(v) </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">s.devices_indices_map(shape).values()))</span>
+  <span class="s1">num_addressable_unique_indices = len(</span>
+      <span class="s1">set(hashed_index(v) </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">s.addressable_devices_indices_map(shape).values()))</span>
+  <span class="s2">return </span><span class="s1">num_unique_indices == num_addressable_unique_indices</span>
+
+
+<span class="s2">class </span><span class="s1">ArrayImpl(basearray.Array):</span>
+  <span class="s0"># TODO(yashkatariya): Add __slots__ here.</span>
+
+  <span class="s1">aval: core.ShapedArray</span>
+  <span class="s1">_sharding: Sharding</span>
+  <span class="s1">_arrays: List[ArrayImpl]</span>
+  <span class="s1">_committed: bool</span>
+  <span class="s1">_skip_checks: bool</span>
+  <span class="s1">_npy_value: Optional[np.ndarray]</span>
+
+  <span class="s1">@use_cpp_method()</span>
+  <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">aval: core.ShapedArray</span><span class="s2">, </span><span class="s1">sharding: Sharding</span><span class="s2">,</span>
+               <span class="s1">arrays: Sequence[ArrayImpl]</span><span class="s2">,</span>
+               <span class="s1">committed: bool</span><span class="s2">, </span><span class="s1">_skip_checks: bool = </span><span class="s2">False</span><span class="s1">):</span>
+    <span class="s0"># NOTE: the actual implementation of the constructor is moved to C++.</span>
+
+    <span class="s1">self.aval = aval</span>
+    <span class="s1">self._sharding = sharding</span>
+    <span class="s1">self._arrays = [a._arrays[</span><span class="s5">0</span><span class="s1">] </span><span class="s2">for </span><span class="s1">a </span><span class="s2">in </span><span class="s1">arrays]</span>
+    <span class="s1">self._committed = committed</span>
+    <span class="s1">self._npy_value = </span><span class="s2">None</span>
+
+    <span class="s0"># Don't rearrange if skip_checks is enabled because this assumes that the</span>
+    <span class="s0"># input buffers are already arranged properly. This usually happens when</span>
+    <span class="s0"># Array's are created as output of a JAX transformation</span>
+    <span class="s0"># (like pjit, xmap, etc).</span>
+    <span class="s2">if not </span><span class="s1">_skip_checks </span><span class="s2">or </span><span class="s1">config.jax_enable_checks:</span>
+      <span class="s1">self._check_and_rearrange()</span>
+
+  <span class="s2">def </span><span class="s1">_check_and_rearrange(self):</span>
+    <span class="s2">for </span><span class="s1">db </span><span class="s2">in </span><span class="s1">self._arrays:</span>
+      <span class="s2">if </span><span class="s1">db.dtype != self.dtype:</span>
+        <span class="s2">raise </span><span class="s1">ValueError(</span>
+            <span class="s4">&quot;Input buffers to `Array` must have matching dtypes. &quot;</span>
+            <span class="s4">f&quot;Got </span><span class="s2">{</span><span class="s1">db.dtype</span><span class="s2">}</span><span class="s4">, expected </span><span class="s2">{</span><span class="s1">self.dtype</span><span class="s2">} </span><span class="s4">for buffer: </span><span class="s2">{</span><span class="s1">db</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s1">)</span>
+
+    <span class="s1">device_id_to_buffer = {db.device().id: db </span><span class="s2">for </span><span class="s1">db </span><span class="s2">in </span><span class="s1">self._arrays}</span>
+
+    <span class="s1">addressable_dev = self.sharding.addressable_devices</span>
+    <span class="s2">if </span><span class="s1">len(self._arrays) != len(addressable_dev):</span>
+      <span class="s2">raise </span><span class="s1">ValueError(</span>
+          <span class="s4">f&quot;Expected </span><span class="s2">{</span><span class="s1">len(addressable_dev)</span><span class="s2">} </span><span class="s4">per-device arrays &quot;</span>
+          <span class="s4">&quot;(this is how many devices are addressable by the sharding), but &quot;</span>
+          <span class="s4">f&quot;got </span><span class="s2">{</span><span class="s1">len(self._arrays)</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s1">)</span>
+
+    <span class="s1">array_device_ids = set(device_id_to_buffer.keys())</span>
+    <span class="s1">addressable_device_ids = {d.id </span><span class="s2">for </span><span class="s1">d </span><span class="s2">in </span><span class="s1">addressable_dev}</span>
+    <span class="s0"># Calculate a symmetric difference because the device ids between sharding</span>
+    <span class="s0"># and _arrays should match.</span>
+    <span class="s1">diff = array_device_ids ^ addressable_device_ids</span>
+    <span class="s2">if </span><span class="s1">diff:</span>
+      <span class="s1">dev_in_sharding_not_in_arrays = addressable_device_ids - array_device_ids</span>
+      <span class="s1">dev_in_arrays_not_in_sharding = array_device_ids - addressable_device_ids</span>
+      <span class="s1">err_msg = (</span>
+          <span class="s4">&quot;Addressable devices and per-device arrays devices do not match.&quot;</span><span class="s1">)</span>
+      <span class="s2">if </span><span class="s1">dev_in_sharding_not_in_arrays:</span>
+        <span class="s1">err_msg += (</span><span class="s4">f&quot; Sharding contains devices </span><span class="s2">{</span><span class="s1">dev_in_sharding_not_in_arrays</span><span class="s2">} </span><span class="s4">&quot;</span>
+                    <span class="s4">&quot;that are not present in per-device arrays.&quot;</span><span class="s1">)</span>
+      <span class="s2">if </span><span class="s1">dev_in_arrays_not_in_sharding:</span>
+        <span class="s1">err_msg += (</span><span class="s4">f&quot; Per-device arrays contain devices </span><span class="s2">{</span><span class="s1">dev_in_arrays_not_in_sharding</span><span class="s2">} </span><span class="s4">&quot;</span>
+                    <span class="s4">&quot;that are not present in the sharding.&quot;</span><span class="s1">)</span>
+      <span class="s2">raise </span><span class="s1">ValueError(err_msg)</span>
+
+    <span class="s1">ss = self.sharding.shard_shape(self.shape)</span>
+    <span class="s2">for </span><span class="s1">db </span><span class="s2">in </span><span class="s1">self._arrays:</span>
+      <span class="s2">if </span><span class="s1">db.shape != ss:</span>
+        <span class="s2">raise </span><span class="s1">ValueError(</span>
+            <span class="s4">f&quot;Expected shard shape </span><span class="s2">{</span><span class="s1">ss</span><span class="s2">} </span><span class="s4">doesn't match the single device array &quot;</span>
+            <span class="s4">f&quot;shape </span><span class="s2">{</span><span class="s1">db.shape</span><span class="s2">}</span><span class="s4">. Shape of Array is &quot;</span>
+            <span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">self.aval.str_short()</span><span class="s2">} </span><span class="s4">with sharding </span><span class="s2">{</span><span class="s1">self.sharding</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s1">)</span>
+
+    <span class="s0"># Rearrange arrays based on the device assignment.</span>
+    <span class="s2">if </span><span class="s1">isinstance(self.sharding</span><span class="s2">, </span><span class="s1">XLACompatibleSharding):</span>
+      <span class="s1">addressable_da = self.sharding._addressable_device_assignment</span>
+      <span class="s1">self._arrays = [device_id_to_buffer[device.id] </span><span class="s2">for </span><span class="s1">device </span><span class="s2">in </span><span class="s1">addressable_da]</span>
+
+  <span class="s1">@property</span>
+  <span class="s2">def </span><span class="s1">shape(self) -&gt; Shape:</span>
+    <span class="s2">return </span><span class="s1">self.aval.shape</span>
+
+  <span class="s1">@property</span>
+  <span class="s2">def </span><span class="s1">dtype(self):</span>
+    <span class="s2">return </span><span class="s1">self.aval.dtype</span>
+
+  <span class="s1">@property</span>
+  <span class="s2">def </span><span class="s1">ndim(self):</span>
+    <span class="s2">return </span><span class="s1">len(self.shape)</span>
+
+  <span class="s1">@property</span>
+  <span class="s2">def </span><span class="s1">size(self):</span>
+    <span class="s2">return </span><span class="s1">math.prod(self.shape)</span>
+
+  <span class="s1">@property</span>
+  <span class="s2">def </span><span class="s1">sharding(self):</span>
+    <span class="s2">return </span><span class="s1">self._sharding</span>
+
+  <span class="s1">@property</span>
+  <span class="s2">def </span><span class="s1">weak_type(self):</span>
+    <span class="s2">return </span><span class="s1">self.aval.weak_type</span>
+
+  <span class="s2">def </span><span class="s1">__str__(self):</span>
+    <span class="s2">return </span><span class="s1">str(self._value)</span>
+
+  <span class="s2">def </span><span class="s1">__len__(self):</span>
+    <span class="s2">try</span><span class="s1">:</span>
+      <span class="s2">return </span><span class="s1">self.shape[</span><span class="s5">0</span><span class="s1">]</span>
+    <span class="s2">except </span><span class="s1">IndexError </span><span class="s2">as </span><span class="s1">err:</span>
+      <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s4">&quot;len() of unsized object&quot;</span><span class="s1">) </span><span class="s2">from </span><span class="s1">err  </span><span class="s0"># same as numpy error</span>
+
+  <span class="s2">def </span><span class="s1">__bool__(self):</span>
+    <span class="s2">return </span><span class="s1">bool(self._value)</span>
+
+  <span class="s2">def </span><span class="s1">__nonzero__(self):</span>
+    <span class="s2">return </span><span class="s1">bool(self._value)</span>
+
+  <span class="s2">def </span><span class="s1">__float__(self):</span>
+    <span class="s2">return </span><span class="s1">self._value.__float__()</span>
+
+  <span class="s2">def </span><span class="s1">__int__(self):</span>
+    <span class="s2">return </span><span class="s1">self._value.__int__()</span>
+
+  <span class="s2">def </span><span class="s1">__complex__(self):</span>
+    <span class="s2">return </span><span class="s1">self._value.__complex__()</span>
+
+  <span class="s2">def </span><span class="s1">__hex__(self):</span>
+    <span class="s2">assert </span><span class="s1">self.ndim == </span><span class="s5">0</span><span class="s2">, </span><span class="s4">'hex only works on scalar values'</span>
+    <span class="s2">return </span><span class="s1">hex(self._value)  </span><span class="s0"># type: ignore</span>
+
+  <span class="s2">def </span><span class="s1">__oct__(self):</span>
+    <span class="s2">assert </span><span class="s1">self.ndim == </span><span class="s5">0</span><span class="s2">, </span><span class="s4">'oct only works on scalar values'</span>
+    <span class="s2">return </span><span class="s1">oct(self._value)  </span><span class="s0"># type: ignore</span>
+
+  <span class="s2">def </span><span class="s1">__index__(self):</span>
+    <span class="s2">return </span><span class="s1">op.index(self._value)</span>
+
+  <span class="s2">def </span><span class="s1">tobytes(self</span><span class="s2">, </span><span class="s1">order=</span><span class="s4">&quot;C&quot;</span><span class="s1">):</span>
+    <span class="s2">return </span><span class="s1">self._value.tobytes(order)</span>
+
+  <span class="s2">def </span><span class="s1">tolist(self):</span>
+    <span class="s2">return </span><span class="s1">self._value.tolist()</span>
+
+  <span class="s2">def </span><span class="s1">__format__(self</span><span class="s2">, </span><span class="s1">format_spec):</span>
+    <span class="s0"># Simulates behavior of https://github.com/numpy/numpy/pull/9883</span>
+    <span class="s2">if </span><span class="s1">self.ndim == </span><span class="s5">0</span><span class="s1">:</span>
+      <span class="s2">return </span><span class="s1">format(self._value[()]</span><span class="s2">, </span><span class="s1">format_spec)</span>
+    <span class="s2">else</span><span class="s1">:</span>
+      <span class="s2">return </span><span class="s1">format(self._value</span><span class="s2">, </span><span class="s1">format_spec)</span>
+
+  <span class="s2">def </span><span class="s1">__getitem__(self</span><span class="s2">, </span><span class="s1">idx):</span>
+    <span class="s2">from </span><span class="s1">jax._src.numpy </span><span class="s2">import </span><span class="s1">lax_numpy</span>
+    <span class="s1">self._check_if_deleted()</span>
+
+    <span class="s2">if </span><span class="s1">isinstance(self.sharding</span><span class="s2">, </span><span class="s1">PmapSharding):</span>
+      <span class="s2">if not </span><span class="s1">isinstance(idx</span><span class="s2">, </span><span class="s1">tuple):</span>
+        <span class="s1">cidx = (idx</span><span class="s2">,</span><span class="s1">) + (slice(</span><span class="s2">None</span><span class="s1">)</span><span class="s2">,</span><span class="s1">) * (len(self.shape) - </span><span class="s5">1</span><span class="s1">)</span>
+      <span class="s2">else</span><span class="s1">:</span>
+        <span class="s1">cidx = idx + (slice(</span><span class="s2">None</span><span class="s1">)</span><span class="s2">,</span><span class="s1">) * (len(self.shape) - len(idx))</span>
+      <span class="s2">if </span><span class="s1">self._npy_value </span><span class="s2">is None</span><span class="s1">:</span>
+        <span class="s1">indices = tuple(self.sharding.devices_indices_map(self.shape).values())</span>
+        <span class="s2">try</span><span class="s1">:</span>
+          <span class="s1">arr_idx = indices.index(cidx)</span>
+        <span class="s2">except </span><span class="s1">ValueError:</span>
+          <span class="s1">arr_idx = </span><span class="s2">None</span>
+        <span class="s2">if </span><span class="s1">arr_idx </span><span class="s2">is not None</span><span class="s1">:</span>
+          <span class="s1">a = self._arrays[arr_idx]</span>
+          <span class="s2">return </span><span class="s1">ArrayImpl(</span>
+              <span class="s1">a.aval</span><span class="s2">, </span><span class="s1">SingleDeviceSharding(a.device())</span><span class="s2">, </span><span class="s1">[a]</span><span class="s2">, </span><span class="s1">committed=</span><span class="s2">False,</span>
+              <span class="s1">_skip_checks=</span><span class="s2">True</span><span class="s1">)</span>
+      <span class="s2">return </span><span class="s1">lax_numpy._rewriting_take(self</span><span class="s2">, </span><span class="s1">idx)</span>
+    <span class="s2">else</span><span class="s1">:</span>
+      <span class="s2">return </span><span class="s1">lax_numpy._rewriting_take(self</span><span class="s2">, </span><span class="s1">idx)</span>
+
+  <span class="s2">def </span><span class="s1">__iter__(self):</span>
+    <span class="s2">if </span><span class="s1">self.ndim == </span><span class="s5">0</span><span class="s1">:</span>
+      <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s4">&quot;iteration over a 0-d array&quot;</span><span class="s1">)  </span><span class="s0"># same as numpy error</span>
+    <span class="s2">else</span><span class="s1">:</span>
+      <span class="s2">assert </span><span class="s1">self.is_fully_replicated </span><span class="s2">or </span><span class="s1">self.is_fully_addressable</span>
+      <span class="s2">if </span><span class="s1">dispatch.is_single_device_sharding(self.sharding) </span><span class="s2">or </span><span class="s1">self.is_fully_replicated:</span>
+        <span class="s2">return </span><span class="s1">(sl </span><span class="s2">for </span><span class="s1">chunk </span><span class="s2">in </span><span class="s1">self._chunk_iter(</span><span class="s5">100</span><span class="s1">) </span><span class="s2">for </span><span class="s1">sl </span><span class="s2">in </span><span class="s1">chunk._unstack())  </span><span class="s0"># type: ignore</span>
+      <span class="s2">elif </span><span class="s1">isinstance(self.sharding</span><span class="s2">, </span><span class="s1">PmapSharding):</span>
+        <span class="s2">return </span><span class="s1">(self[i] </span><span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range(self.shape[</span><span class="s5">0</span><span class="s1">]))  </span><span class="s0"># type: ignore</span>
+      <span class="s2">else</span><span class="s1">:</span>
+        <span class="s0"># TODO(yashkatariya): Don't bounce to host and use `_chunk_iter` path</span>
+        <span class="s0"># here after uneven partitioning support is added.</span>
+        <span class="s2">return </span><span class="s1">(api.device_put(self._value[i]) </span><span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range(self.shape[</span><span class="s5">0</span><span class="s1">]))</span>
+
+  <span class="s1">@property</span>
+  <span class="s2">def </span><span class="s1">is_fully_replicated(self) -&gt; bool:</span>
+    <span class="s2">return </span><span class="s1">self.sharding.is_fully_replicated</span>
+
+  <span class="s2">def </span><span class="s1">__repr__(self):</span>
+    <span class="s1">prefix = </span><span class="s4">'Array('</span>
+    <span class="s2">if </span><span class="s1">self.aval </span><span class="s2">is not None and </span><span class="s1">self.aval.weak_type:</span>
+      <span class="s1">dtype_str = </span><span class="s4">f'dtype=</span><span class="s2">{</span><span class="s1">self.dtype.name</span><span class="s2">}</span><span class="s4">, weak_type=True)'</span>
+    <span class="s2">else</span><span class="s1">:</span>
+      <span class="s1">dtype_str = </span><span class="s4">f'dtype=</span><span class="s2">{</span><span class="s1">self.dtype.name</span><span class="s2">}</span><span class="s4">)'</span>
+
+    <span class="s2">if </span><span class="s1">self.is_fully_addressable </span><span class="s2">or </span><span class="s1">self.is_fully_replicated:</span>
+      <span class="s1">line_width = np.get_printoptions()[</span><span class="s4">&quot;linewidth&quot;</span><span class="s1">]</span>
+      <span class="s1">s = np.array2string(self._value</span><span class="s2">, </span><span class="s1">prefix=prefix</span><span class="s2">, </span><span class="s1">suffix=</span><span class="s4">','</span><span class="s2">,</span>
+                          <span class="s1">separator=</span><span class="s4">', '</span><span class="s2">, </span><span class="s1">max_line_width=line_width)</span>
+      <span class="s1">last_line_len = len(s) - s.rfind(</span><span class="s4">'</span><span class="s2">\n</span><span class="s4">'</span><span class="s1">) + </span><span class="s5">1</span>
+      <span class="s1">sep = </span><span class="s4">' '</span>
+      <span class="s2">if </span><span class="s1">last_line_len + len(dtype_str) + </span><span class="s5">1 </span><span class="s1">&gt; line_width:</span>
+        <span class="s1">sep = </span><span class="s4">' ' </span><span class="s1">* len(prefix)</span>
+      <span class="s2">return </span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">prefix</span><span class="s2">}{</span><span class="s1">s</span><span class="s2">}</span><span class="s4">,</span><span class="s2">{</span><span class="s1">sep</span><span class="s2">}{</span><span class="s1">dtype_str</span><span class="s2">}</span><span class="s4">&quot;</span>
+    <span class="s2">else</span><span class="s1">:</span>
+      <span class="s2">return </span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">prefix</span><span class="s2">}{</span><span class="s1">self.shape</span><span class="s2">}</span><span class="s4">, </span><span class="s2">{</span><span class="s1">dtype_str</span><span class="s2">}</span><span class="s4">&quot;</span>
+
+  <span class="s1">@functools.cached_property</span>
+  <span class="s2">def </span><span class="s1">is_fully_addressable(self) -&gt; bool:</span>
+    <span class="s2">return </span><span class="s1">self.sharding.is_fully_addressable</span>
+
+  <span class="s2">def </span><span class="s1">__array__(self</span><span class="s2">, </span><span class="s1">dtype=</span><span class="s2">None, </span><span class="s1">context=</span><span class="s2">None</span><span class="s1">):</span>
+    <span class="s2">return </span><span class="s1">np.asarray(self._value</span><span class="s2">, </span><span class="s1">dtype=dtype)</span>
+
+  <span class="s2">def </span><span class="s1">__dlpack__(self):</span>
+    <span class="s2">from </span><span class="s1">jax._src.dlpack </span><span class="s2">import </span><span class="s1">to_dlpack  </span><span class="s0"># pylint: disable=g-import-not-at-top</span>
+    <span class="s2">return </span><span class="s1">to_dlpack(self)</span>
+
+  <span class="s2">def </span><span class="s1">__reduce__(self):</span>
+    <span class="s1">fun</span><span class="s2">, </span><span class="s1">args</span><span class="s2">, </span><span class="s1">arr_state = self._value.__reduce__()  </span><span class="s0"># type: ignore</span>
+    <span class="s1">aval_state = {</span><span class="s4">'weak_type'</span><span class="s1">: self.aval.weak_type</span><span class="s2">,</span>
+                  <span class="s4">'named_shape'</span><span class="s1">: self.aval.named_shape}</span>
+    <span class="s2">return </span><span class="s1">(_reconstruct_array</span><span class="s2">, </span><span class="s1">(fun</span><span class="s2">, </span><span class="s1">args</span><span class="s2">, </span><span class="s1">arr_state</span><span class="s2">, </span><span class="s1">aval_state))</span>
+
+  <span class="s1">@use_cpp_method()</span>
+  <span class="s2">def </span><span class="s1">unsafe_buffer_pointer(self):</span>
+    <span class="s2">if </span><span class="s1">len(self._arrays) != </span><span class="s5">1</span><span class="s1">:</span>
+      <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s4">&quot;unsafe_buffer_pointer() is supported only for unsharded&quot;</span>
+                       <span class="s4">&quot; arrays.&quot;</span><span class="s1">)</span>
+    <span class="s2">return </span><span class="s1">self._arrays[</span><span class="s5">0</span><span class="s1">].unsafe_buffer_pointer()</span>
+
+  <span class="s1">@property</span>
+  <span class="s1">@use_cpp_method()</span>
+  <span class="s2">def </span><span class="s1">__cuda_array_interface__(self):</span>
+    <span class="s2">if </span><span class="s1">len(self._arrays) != </span><span class="s5">1</span><span class="s1">:</span>
+      <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s4">&quot;__cuda_array_interface__() is supported only for &quot;</span>
+                       <span class="s4">&quot;unsharded arrays.&quot;</span><span class="s1">)</span>
+    <span class="s2">return </span><span class="s1">self._arrays[</span><span class="s5">0</span><span class="s1">].__cuda_array_interface__  </span><span class="s0"># pytype: disable=attribute-error  # bind-properties</span>
+
+  <span class="s1">@use_cpp_method()</span>
+  <span class="s2">def </span><span class="s1">on_device_size_in_bytes(self):</span>
+    <span class="s3">&quot;&quot;&quot;Returns the total global on-device size of the array in bytes.&quot;&quot;&quot;</span>
+    <span class="s1">arr = self._arrays[</span><span class="s5">0</span><span class="s1">]</span>
+    <span class="s1">per_shard_size = arr.on_device_size_in_bytes()  </span><span class="s0"># type: ignore</span>
+    <span class="s2">return </span><span class="s1">per_shard_size * len(self.sharding.device_set)</span>
+
+  <span class="s0"># TODO(yashkatariya): Remove this method when everyone is using devices().</span>
+  <span class="s2">def </span><span class="s1">device(self) -&gt; Device:</span>
+    <span class="s1">self._check_if_deleted()</span>
+    <span class="s1">device_set = self.sharding.device_set</span>
+    <span class="s2">if </span><span class="s1">len(device_set) == </span><span class="s5">1</span><span class="s1">:</span>
+      <span class="s1">single_device</span><span class="s2">, </span><span class="s1">= device_set</span>
+      <span class="s2">return </span><span class="s1">single_device</span>
+    <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s4">'Length of devices is greater than 1. '</span>
+                     <span class="s4">'Please use `.devices()`.'</span><span class="s1">)</span>
+
+  <span class="s2">def </span><span class="s1">devices(self) -&gt; Set[Device]:</span>
+    <span class="s1">self._check_if_deleted()</span>
+    <span class="s2">return </span><span class="s1">self.sharding.device_set</span>
+
+  <span class="s0"># TODO(https://github.com/google/jax/issues/12380): Remove this when DA is</span>
+  <span class="s0"># deleted.</span>
+  <span class="s1">@property</span>
+  <span class="s2">def </span><span class="s1">device_buffer(self) -&gt; ArrayImpl:</span>
+    <span class="s1">self._check_if_deleted()</span>
+    <span class="s2">if </span><span class="s1">len(self._arrays) == </span><span class="s5">1</span><span class="s1">:</span>
+      <span class="s2">return </span><span class="s1">self._arrays[</span><span class="s5">0</span><span class="s1">]</span>
+    <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s4">'Length of buffers is greater than 1. Please use '</span>
+                     <span class="s4">'`.device_buffers` instead.'</span><span class="s1">)</span>
+
+  <span class="s0"># TODO(https://github.com/google/jax/issues/12380): Remove this when SDA is</span>
+  <span class="s0"># deleted.</span>
+  <span class="s1">@property</span>
+  <span class="s2">def </span><span class="s1">device_buffers(self) -&gt; Sequence[ArrayImpl]:</span>
+    <span class="s1">self._check_if_deleted()</span>
+    <span class="s2">return </span><span class="s1">cast(Sequence[ArrayImpl]</span><span class="s2">, </span><span class="s1">self._arrays)</span>
+
+  <span class="s2">def </span><span class="s1">addressable_data(self</span><span class="s2">, </span><span class="s1">index: int) -&gt; ArrayImpl:</span>
+    <span class="s1">self._check_if_deleted()</span>
+    <span class="s2">if </span><span class="s1">self.is_fully_replicated:</span>
+      <span class="s2">return </span><span class="s1">self._fully_replicated_shard()</span>
+    <span class="s2">return </span><span class="s1">self._arrays[index]</span>
+
+  <span class="s1">@functools.cached_property</span>
+  <span class="s2">def </span><span class="s1">addressable_shards(self) -&gt; Sequence[Shard]:</span>
+    <span class="s1">self._check_if_deleted()</span>
+    <span class="s1">out = []</span>
+    <span class="s2">for </span><span class="s1">a </span><span class="s2">in </span><span class="s1">self._arrays:</span>
+      <span class="s1">out.append(Shard(a.device()</span><span class="s2">, </span><span class="s1">self.sharding</span><span class="s2">, </span><span class="s1">self.shape</span><span class="s2">, </span><span class="s1">a))</span>
+    <span class="s2">return </span><span class="s1">out</span>
+
+  <span class="s1">@property</span>
+  <span class="s2">def </span><span class="s1">global_shards(self) -&gt; Sequence[Shard]:</span>
+    <span class="s3">&quot;&quot;&quot;Returns list of all `Shard`s of the Array across all devices. 
+ 
+    The result includes shards that are not addressable by the current process. 
+    If a `Shard` is not addressable, then its `data` will be `None`. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">self._check_if_deleted()</span>
+    <span class="s2">if </span><span class="s1">self.is_fully_addressable:  </span><span class="s0"># pylint: disable=using-constant-test</span>
+      <span class="s2">return </span><span class="s1">self.addressable_shards</span>
+
+    <span class="s1">out = []</span>
+    <span class="s1">device_id_to_buffer = {a.device().id: a </span><span class="s2">for </span><span class="s1">a </span><span class="s2">in </span><span class="s1">self._arrays}</span>
+    <span class="s2">for </span><span class="s1">global_d </span><span class="s2">in </span><span class="s1">self.sharding.device_set:</span>
+      <span class="s2">if </span><span class="s1">device_id_to_buffer.get(global_d.id</span><span class="s2">, None</span><span class="s1">) </span><span class="s2">is not None</span><span class="s1">:</span>
+        <span class="s1">array = device_id_to_buffer[global_d.id]</span>
+      <span class="s2">else</span><span class="s1">:</span>
+        <span class="s1">array = </span><span class="s2">None</span>
+      <span class="s1">out.append(Shard(global_d</span><span class="s2">, </span><span class="s1">self.sharding</span><span class="s2">, </span><span class="s1">self.shape</span><span class="s2">, </span><span class="s1">array))</span>
+    <span class="s2">return </span><span class="s1">out</span>
+
+  <span class="s1">@use_cpp_method()</span>
+  <span class="s2">def </span><span class="s1">delete(self):</span>
+    <span class="s2">if </span><span class="s1">self._arrays </span><span class="s2">is None</span><span class="s1">:</span>
+      <span class="s2">return</span>
+    <span class="s2">for </span><span class="s1">buf </span><span class="s2">in </span><span class="s1">self._arrays:</span>
+      <span class="s1">buf.delete()</span>
+    <span class="s1">self._arrays = </span><span class="s2">None</span>
+    <span class="s1">self._npy_value = </span><span class="s2">None</span>
+
+  <span class="s1">@use_cpp_method()</span>
+  <span class="s2">def </span><span class="s1">is_deleted(self):</span>
+    <span class="s2">if </span><span class="s1">self._arrays </span><span class="s2">is None</span><span class="s1">:</span>
+      <span class="s2">return True</span>
+    <span class="s0"># This path is taken when a view of `Array` is created and the original</span>
+    <span class="s0"># Array is deleted. In that case, the buffers the view represents also get</span>
+    <span class="s0"># deleted.</span>
+    <span class="s2">return </span><span class="s1">any(buf.is_deleted() </span><span class="s2">for </span><span class="s1">buf </span><span class="s2">in </span><span class="s1">self._arrays)</span>
+
+  <span class="s2">def </span><span class="s1">_check_if_deleted(self):</span>
+    <span class="s2">if </span><span class="s1">self.is_deleted():</span>
+      <span class="s2">raise </span><span class="s1">RuntimeError(</span><span class="s4">&quot;Array has been deleted.&quot;</span><span class="s1">)</span>
+
+  <span class="s1">@use_cpp_method()</span>
+  <span class="s2">def </span><span class="s1">block_until_ready(self):</span>
+    <span class="s1">self._check_if_deleted()</span>
+    <span class="s2">for </span><span class="s1">db </span><span class="s2">in </span><span class="s1">self._arrays:</span>
+      <span class="s1">db.block_until_ready()</span>
+    <span class="s2">return </span><span class="s1">self</span>
+
+  <span class="s1">@use_cpp_method()</span>
+  <span class="s2">def </span><span class="s1">_single_device_array_to_np_array(self):</span>
+    <span class="s2">return </span><span class="s1">np.asarray(self._arrays[</span><span class="s5">0</span><span class="s1">])</span>
+
+  <span class="s1">@use_cpp_method()</span>
+  <span class="s2">def </span><span class="s1">_copy_single_device_array_to_host_async(self):</span>
+    <span class="s1">self._arrays[</span><span class="s5">0</span><span class="s1">].copy_to_host_async()</span>
+
+  <span class="s1">@profiler.annotate_function</span>
+  <span class="s2">def </span><span class="s1">copy_to_host_async(self):</span>
+    <span class="s1">self._check_if_deleted()</span>
+    <span class="s2">if </span><span class="s1">self._npy_value </span><span class="s2">is None</span><span class="s1">:</span>
+      <span class="s2">if </span><span class="s1">self.is_fully_replicated:</span>
+        <span class="s1">self._copy_single_device_array_to_host_async()</span>
+        <span class="s2">return</span>
+      <span class="s1">copy_plan = _create_copy_plan(self._arrays</span><span class="s2">, </span><span class="s1">self.sharding</span><span class="s2">, </span><span class="s1">self.shape)</span>
+      <span class="s2">for </span><span class="s1">_</span><span class="s2">, </span><span class="s1">arr </span><span class="s2">in </span><span class="s1">copy_plan:</span>
+        <span class="s1">arr._copy_single_device_array_to_host_async()</span>
+
+  <span class="s1">@property</span>
+  <span class="s1">@functools.partial(profiler.annotate_function</span><span class="s2">, </span><span class="s1">name=</span><span class="s4">&quot;np.asarray(jax.Array)&quot;</span><span class="s1">)</span>
+  <span class="s2">def </span><span class="s1">_value(self) -&gt; np.ndarray:</span>
+    <span class="s1">self._check_if_deleted()</span>
+
+    <span class="s2">if </span><span class="s1">self._npy_value </span><span class="s2">is None</span><span class="s1">:</span>
+      <span class="s2">if </span><span class="s1">self.is_fully_replicated:</span>
+        <span class="s1">self._npy_value = self._single_device_array_to_np_array()  </span><span class="s0"># type: ignore</span>
+        <span class="s1">self._npy_value.flags.writeable = </span><span class="s2">False</span>
+        <span class="s2">return </span><span class="s1">cast(np.ndarray</span><span class="s2">, </span><span class="s1">self._npy_value)</span>
+
+      <span class="s0"># TODO(yashkatariya): Merge `_process_has_full_value_in_mcjax` with</span>
+      <span class="s0"># is_fully_addressable.</span>
+      <span class="s2">if </span><span class="s1">(</span><span class="s2">not </span><span class="s1">self.is_fully_addressable </span><span class="s2">and</span>
+          <span class="s2">not </span><span class="s1">_process_has_full_value_in_mcjax(self.sharding</span><span class="s2">, </span><span class="s1">self.shape)):</span>
+        <span class="s2">raise </span><span class="s1">RuntimeError(</span><span class="s4">&quot;Fetching value for `jax.Array` that spans &quot;</span>
+                           <span class="s4">&quot;non-addressable devices is not possible. You can use &quot;</span>
+                           <span class="s4">&quot;`jax.experimental.multihost_utils.process_allgather` &quot;</span>
+                           <span class="s4">&quot;for this use case.&quot;</span><span class="s1">)</span>
+
+      <span class="s1">copy_plan = _create_copy_plan(self._arrays</span><span class="s2">, </span><span class="s1">self.sharding</span><span class="s2">, </span><span class="s1">self.shape)</span>
+      <span class="s2">for </span><span class="s1">_</span><span class="s2">, </span><span class="s1">arr </span><span class="s2">in </span><span class="s1">copy_plan:</span>
+        <span class="s1">arr._copy_single_device_array_to_host_async()</span>
+
+      <span class="s1">npy_value = np.empty(self.shape</span><span class="s2">, </span><span class="s1">self.dtype)</span>
+      <span class="s2">for </span><span class="s1">ind</span><span class="s2">, </span><span class="s1">arr </span><span class="s2">in </span><span class="s1">copy_plan:</span>
+        <span class="s1">npy_value[ind] = arr._single_device_array_to_np_array()</span>
+      <span class="s1">self._npy_value = npy_value  </span><span class="s0"># type: ignore</span>
+      <span class="s1">self._npy_value.flags.writeable = </span><span class="s2">False</span>
+    <span class="s0"># https://docs.python.org/3/library/typing.html#typing.cast</span>
+    <span class="s2">return </span><span class="s1">cast(np.ndarray</span><span class="s2">, </span><span class="s1">self._npy_value)</span>
+
+
+<span class="s0"># TODO(b/273265390): ideally we would write this as a decorator on the ArrayImpl</span>
+<span class="s0"># class, however this triggers a pytype bug. Workaround: apply the decorator</span>
+<span class="s0"># after the fact.</span>
+<span class="s2">if not </span><span class="s1">TYPE_CHECKING:</span>
+  <span class="s1">ArrayImpl = use_cpp_class(xc.ArrayImpl)(ArrayImpl)</span>
+
+
+<span class="s0"># explicitly set to be unhashable. Same as what device_array.py does.</span>
+<span class="s1">setattr(ArrayImpl</span><span class="s2">, </span><span class="s4">&quot;__hash__&quot;</span><span class="s2">, None</span><span class="s1">)</span>
+<span class="s1">setattr(ArrayImpl</span><span class="s2">, </span><span class="s4">&quot;__array_priority__&quot;</span><span class="s2">, </span><span class="s5">100</span><span class="s1">)</span>
+
+<span class="s2">def </span><span class="s1">make_array_from_callback(</span>
+    <span class="s1">shape: Shape</span><span class="s2">, </span><span class="s1">sharding: Sharding</span><span class="s2">,</span>
+    <span class="s1">data_callback: Callable[[Optional[Index]]</span><span class="s2">, </span><span class="s1">ArrayLike]) -&gt; ArrayImpl:</span>
+  <span class="s3">&quot;&quot;&quot;Returns a ``jax.Array`` via data fetched from ``data_callback``. 
+ 
+  ``data_callback`` is used to fetch the data for each addressable shard of the 
+  returned ``jax.Array``. 
+ 
+  Args: 
+    shape : Shape of the ``jax.Array``. 
+    sharding: A ``Sharding`` instance which describes how the ``jax.Array`` is 
+      laid out across devices. 
+    data_callback : Callback that takes indices into the global array value as 
+      input and returns the corresponding data of the global array value. 
+      The data can be returned as any array-like object, e.g. a ``numpy.ndarray``. 
+ 
+  Returns: 
+    A ``jax.Array`` via data fetched from ``data_callback``. 
+ 
+  Example: 
+ 
+    &gt;&gt;&gt; import math 
+    &gt;&gt;&gt; from jax.sharding import Mesh 
+    &gt;&gt;&gt; from jax.sharding import PartitionSpec as P 
+    &gt;&gt;&gt; import numpy as np 
+    ... 
+    &gt;&gt;&gt; input_shape = (8, 8) 
+    &gt;&gt;&gt; global_input_data = np.arange(math.prod(input_shape)).reshape(input_shape) 
+    &gt;&gt;&gt; global_mesh = Mesh(np.array(jax.devices()).reshape(2, 4), ('x', 'y')) 
+    &gt;&gt;&gt; inp_sharding = jax.sharding.NamedSharding(global_mesh, P('x', 'y')) 
+    ... 
+    &gt;&gt;&gt; def cb(index): 
+    ...  return global_input_data[index] 
+    ... 
+    &gt;&gt;&gt; arr = jax.make_array_from_callback(input_shape, inp_sharding, cb) 
+    &gt;&gt;&gt; arr.addressable_data(0).shape 
+    (4, 2) 
+  &quot;&quot;&quot;</span>
+  <span class="s1">device_to_index_map = sharding.devices_indices_map(shape)</span>
+  <span class="s0"># Use addressable_devices here instead of `_addressable_device_assignment`</span>
+  <span class="s0"># because `_addressable_device_assignment` is only available on</span>
+  <span class="s0"># `XLACompatibleSharding` and this function is supposed to work for every</span>
+  <span class="s0"># `Sharding`.</span>
+  <span class="s1">arrays = [</span>
+      <span class="s1">api.device_put(data_callback(device_to_index_map[device])</span><span class="s2">, </span><span class="s1">device)</span>
+      <span class="s2">for </span><span class="s1">device </span><span class="s2">in </span><span class="s1">sharding.addressable_devices</span>
+  <span class="s1">]</span>
+  <span class="s1">aval = core.ShapedArray(shape</span><span class="s2">, </span><span class="s1">arrays[</span><span class="s5">0</span><span class="s1">].dtype</span><span class="s2">, </span><span class="s1">weak_type=</span><span class="s2">False</span><span class="s1">)</span>
+  <span class="s2">if </span><span class="s1">dtypes.is_opaque_dtype(aval.dtype):</span>
+    <span class="s2">return </span><span class="s1">aval.dtype._rules.make_sharded_array(aval</span><span class="s2">, </span><span class="s1">sharding</span><span class="s2">, </span><span class="s1">arrays</span><span class="s2">, </span><span class="s1">committed=</span><span class="s2">True</span><span class="s1">)</span>
+  <span class="s2">return </span><span class="s1">ArrayImpl(aval</span><span class="s2">, </span><span class="s1">sharding</span><span class="s2">, </span><span class="s1">arrays</span><span class="s2">, </span><span class="s1">committed=</span><span class="s2">True</span><span class="s1">)</span>
+
+
+<span class="s2">def </span><span class="s1">make_array_from_single_device_arrays(</span>
+    <span class="s1">shape: Shape</span><span class="s2">, </span><span class="s1">sharding: Sharding</span><span class="s2">, </span><span class="s1">arrays: Sequence[basearray.Array]</span>
+<span class="s1">) -&gt; ArrayImpl:</span>
+  <span class="s3">r&quot;&quot;&quot;Returns a ``jax.Array`` from a sequence of ``jax.Array``\s on a single device. 
+ 
+  ``jax.Array`` on a single device is analogous to a ``DeviceArray``. You can use 
+  this function if you have already ``jax.device_put`` the value on a single 
+  device and want to create a global Array. The smaller ``jax.Array``\s should be 
+  addressable and belong to the current process. 
+ 
+  Args: 
+    shape : Shape of the ``jax.Array``. 
+    sharding: A ``Sharding`` instance which describes how the ``jax.Array`` is 
+      laid out across devices. 
+    arrays: Sequence of ``jax.Array``\s that are on a single device. 
+ 
+  Returns: 
+    A ``jax.Array`` from a sequence of ``jax.Array``\s on a single device. 
+ 
+  Example: 
+ 
+    &gt;&gt;&gt; import math 
+    &gt;&gt;&gt; from jax.sharding import Mesh 
+    &gt;&gt;&gt; from jax.sharding import PartitionSpec as P 
+    &gt;&gt;&gt; import numpy as np 
+    ... 
+    &gt;&gt;&gt; global_shape = (8, 8) 
+    &gt;&gt;&gt; global_mesh = Mesh(np.array(jax.devices()).reshape(2, 4), ('x', 'y')) 
+    &gt;&gt;&gt; sharding = jax.sharding.NamedSharding(global_mesh, P('x', 'y')) 
+    &gt;&gt;&gt; inp_data = np.arange(math.prod(global_shape)).reshape(global_shape) 
+    ... 
+    &gt;&gt;&gt; arrays = [ 
+    ...     jax.device_put(inp_data[index], d) 
+    ...     for d, index in sharding.addressable_devices_indices_map(global_shape).items()] 
+    ... 
+    &gt;&gt;&gt; arr = jax.make_array_from_single_device_arrays(global_shape, sharding, arrays) 
+    &gt;&gt;&gt; arr.addressable_data(0).shape 
+    (4, 2) 
+ 
+    In multi-process case, if the input is process local and data parallel 
+    i.e. each process receives a different part of the data, then you can use 
+    `make_array_from_single_device_arrays` to create a global jax.Array 
+ 
+    &gt;&gt;&gt; local_shape = (8, 2) 
+    &gt;&gt;&gt; global_shape = (jax.process_count() * local_shape[0], ) + local_shape[1:] 
+    &gt;&gt;&gt; local_array = np.arange(math.prod(local_shape)).reshape(local_shape) 
+    &gt;&gt;&gt; arrays = jax.device_put( 
+    ...   np.split(local_array, len(global_mesh.local_devices), axis = 0), global_mesh.local_devices) 
+    &gt;&gt;&gt; sharding = jax.sharding.NamedSharding(global_mesh, P(('x', 'y'), )) 
+    &gt;&gt;&gt; arr = jax.make_array_from_single_device_arrays(global_shape, sharding, arrays) 
+    &gt;&gt;&gt; arr.addressable_data(0).shape 
+    (1, 2) 
+  &quot;&quot;&quot;</span>
+  <span class="s0"># All input arrays should be committed. Checking it is expensive on</span>
+  <span class="s0"># single-controller systems.</span>
+  <span class="s1">aval = core.ShapedArray(shape</span><span class="s2">, </span><span class="s1">arrays[</span><span class="s5">0</span><span class="s1">].dtype</span><span class="s2">, </span><span class="s1">weak_type=</span><span class="s2">False</span><span class="s1">)</span>
+  <span class="s2">if </span><span class="s1">dtypes.is_opaque_dtype(aval.dtype):</span>
+    <span class="s2">return </span><span class="s1">aval.dtype._rules.make_sharded_array(aval</span><span class="s2">, </span><span class="s1">sharding</span><span class="s2">, </span><span class="s1">arrays</span><span class="s2">, </span><span class="s1">committed=</span><span class="s2">True</span><span class="s1">)</span>
+  <span class="s0"># TODO(phawkins): ideally the cast() could be checked. Revisit this after</span>
+  <span class="s0"># removing DeviceArray.</span>
+  <span class="s2">return </span><span class="s1">ArrayImpl(aval</span><span class="s2">, </span><span class="s1">sharding</span><span class="s2">, </span><span class="s1">cast(Sequence[ArrayImpl]</span><span class="s2">, </span><span class="s1">arrays)</span><span class="s2">,</span>
+                   <span class="s1">committed=</span><span class="s2">True</span><span class="s1">)</span>
+
+
+<span class="s1">core.pytype_aval_mappings[ArrayImpl] = abstract_arrays.canonical_concrete_aval</span>
+<span class="s1">xla.pytype_aval_mappings[ArrayImpl] = op.attrgetter(</span><span class="s4">'aval'</span><span class="s1">)</span>
+<span class="s1">xla.canonicalize_dtype_handlers[ArrayImpl] = pxla.identity</span>
+<span class="s1">api_util._shaped_abstractify_handlers[ArrayImpl] = op.attrgetter(</span><span class="s4">'aval'</span><span class="s1">)</span>
+<span class="s0"># TODO(jakevdp) replace this with true inheritance at the C++ level.</span>
+<span class="s1">basearray.Array.register(ArrayImpl)</span>
+
+
+<span class="s2">def </span><span class="s1">_array_mlir_constant_handler(val</span><span class="s2">, </span><span class="s1">canonicalize_types=</span><span class="s2">True</span><span class="s1">):</span>
+  <span class="s2">return </span><span class="s1">mlir.ir_constants(val._value</span><span class="s2">,</span>
+                           <span class="s1">canonicalize_types=canonicalize_types)</span>
+<span class="s1">mlir.register_constant_handler(ArrayImpl</span><span class="s2">, </span><span class="s1">_array_mlir_constant_handler)</span>
+
+
+<span class="s2">def </span><span class="s1">_array_shard_arg(x</span><span class="s2">, </span><span class="s1">devices</span><span class="s2">, </span><span class="s1">indices</span><span class="s2">, </span><span class="s1">sharding):</span>
+  <span class="s1">x._check_if_deleted()</span>
+
+  <span class="s1">x_indices = x.sharding.addressable_devices_indices_map(x.shape).values()</span>
+  <span class="s2">if not </span><span class="s1">x.is_fully_addressable:</span>
+    <span class="s2">if </span><span class="s1">tuple(x_indices) == tuple(indices):</span>
+      <span class="s2">return </span><span class="s1">x</span>
+    <span class="s2">else</span><span class="s1">:</span>
+      <span class="s2">raise </span><span class="s1">NotImplementedError(</span>
+          <span class="s4">&quot;Cannot reshard an input that is not fully addressable&quot;</span><span class="s1">)</span>
+  <span class="s2">else</span><span class="s1">:</span>
+    <span class="s2">if </span><span class="s1">tuple(x_indices) == tuple(indices):</span>
+      <span class="s2">return </span><span class="s1">xc.copy_array_to_devices_with_sharding(</span>
+          <span class="s1">x</span><span class="s2">, </span><span class="s1">list(devices)</span><span class="s2">, </span><span class="s1">sharding)</span>
+    <span class="s0"># Resharding starts here:</span>
+    <span class="s2">if </span><span class="s1">dispatch.is_single_device_sharding(x.sharding):</span>
+      <span class="s2">return </span><span class="s1">pxla.shard_device_array(x</span><span class="s2">, </span><span class="s1">devices</span><span class="s2">, </span><span class="s1">indices</span><span class="s2">, </span><span class="s1">sharding)</span>
+    <span class="s2">else</span><span class="s1">:</span>
+      <span class="s2">return </span><span class="s1">pxla.shard_sharded_device_array_slow_path(</span>
+          <span class="s1">x</span><span class="s2">, </span><span class="s1">devices</span><span class="s2">, </span><span class="s1">indices</span><span class="s2">, </span><span class="s1">sharding)</span>
+
+
+<span class="s1">pxla.shard_arg_handlers[ArrayImpl] = _array_shard_arg</span>
+
+
+<span class="s2">def </span><span class="s1">_array_global_result_handler(global_aval</span><span class="s2">, </span><span class="s1">out_sharding</span><span class="s2">, </span><span class="s1">committed</span><span class="s2">,</span>
+                                 <span class="s1">is_out_sharding_from_xla):</span>
+  <span class="s2">if </span><span class="s1">global_aval.dtype == dtypes.float0:</span>
+    <span class="s2">return lambda </span><span class="s1">_: np.zeros(global_aval.shape</span><span class="s2">, </span><span class="s1">dtypes.float0)  </span><span class="s0"># type: ignore</span>
+  <span class="s2">if </span><span class="s1">dtypes.is_opaque_dtype(global_aval.dtype):</span>
+    <span class="s2">return </span><span class="s1">global_aval.dtype._rules.global_sharded_result_handler(</span>
+        <span class="s1">global_aval</span><span class="s2">, </span><span class="s1">out_sharding</span><span class="s2">, </span><span class="s1">committed</span><span class="s2">, </span><span class="s1">is_out_sharding_from_xla)</span>
+  <span class="s2">return </span><span class="s1">xc.array_result_handler(</span>
+      <span class="s1">global_aval</span><span class="s2">, </span><span class="s1">out_sharding</span><span class="s2">, </span><span class="s1">committed=committed</span><span class="s2">, </span><span class="s1">_skip_checks=</span><span class="s2">True</span>
+  <span class="s1">)</span>
+<span class="s1">pxla.global_result_handlers[core.ShapedArray] = _array_global_result_handler</span>
+<span class="s1">pxla.global_result_handlers[core.ConcreteArray] = _array_global_result_handler</span>
+<span class="s1">pxla.global_result_handlers[core.AbstractToken] = </span><span class="s2">lambda </span><span class="s1">*_: </span><span class="s2">lambda </span><span class="s1">*_: core.token</span>
+
+
+<span class="s0"># Only used for Arrays that come out of pmap.</span>
+<span class="s2">def </span><span class="s1">_array_local_result_handler(aval</span><span class="s2">, </span><span class="s1">sharding</span><span class="s2">, </span><span class="s1">indices):</span>
+  <span class="s2">if </span><span class="s1">aval.dtype == dtypes.float0:</span>
+    <span class="s2">return lambda </span><span class="s1">_: np.zeros(aval.shape</span><span class="s2">, </span><span class="s1">dtypes.float0)  </span><span class="s0"># type: ignore</span>
+  <span class="s2">if </span><span class="s1">dtypes.is_opaque_dtype(aval.dtype):</span>
+    <span class="s2">return </span><span class="s1">aval.dtype._rules.local_sharded_result_handler(</span>
+        <span class="s1">aval</span><span class="s2">, </span><span class="s1">sharding</span><span class="s2">, </span><span class="s1">indices)</span>
+  <span class="s2">return </span><span class="s1">xc.array_result_handler(</span>
+      <span class="s1">aval</span><span class="s2">, </span><span class="s1">sharding</span><span class="s2">, </span><span class="s1">committed=</span><span class="s2">True, </span><span class="s1">_skip_checks=</span><span class="s2">True</span>
+  <span class="s1">)</span>
+<span class="s1">pxla.local_result_handlers[core.ShapedArray] = _array_local_result_handler</span>
+<span class="s1">pxla.local_result_handlers[core.ConcreteArray] = _array_local_result_handler</span>
+</pre>
+</body>
+</html>

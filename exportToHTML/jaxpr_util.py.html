@@ -1,0 +1,230 @@
+<html>
+<head>
+<title>jaxpr_util.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #cc7832;}
+.s4 { color: #6a8759;}
+.s5 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+jaxpr_util.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright 2020 The JAX Authors.</span>
+<span class="s0">#</span>
+<span class="s0"># Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="s0"># you may not use this file except in compliance with the License.</span>
+<span class="s0"># You may obtain a copy of the License at</span>
+<span class="s0">#</span>
+<span class="s0">#     https://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="s0">#</span>
+<span class="s0"># Unless required by applicable law or agreed to in writing, software</span>
+<span class="s0"># distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="s0"># WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="s0"># See the License for the specific language governing permissions and</span>
+<span class="s0"># limitations under the License.</span>
+
+<span class="s2">&quot;&quot;&quot;Utilities for the Jaxpr IR.&quot;&quot;&quot;</span>
+
+<span class="s3">import </span><span class="s1">collections</span>
+<span class="s3">import </span><span class="s1">gzip</span>
+<span class="s3">import </span><span class="s1">itertools</span>
+<span class="s3">import </span><span class="s1">json</span>
+<span class="s3">import </span><span class="s1">types</span>
+<span class="s3">from </span><span class="s1">typing </span><span class="s3">import </span><span class="s1">Any</span><span class="s3">, </span><span class="s1">Callable</span><span class="s3">, </span><span class="s1">DefaultDict</span><span class="s3">, </span><span class="s1">Dict</span><span class="s3">, </span><span class="s1">List</span><span class="s3">, </span><span class="s1">Optional</span><span class="s3">, </span><span class="s1">Tuple</span>
+
+<span class="s3">from </span><span class="s1">jax._src </span><span class="s3">import </span><span class="s1">core</span>
+<span class="s3">from </span><span class="s1">jax._src </span><span class="s3">import </span><span class="s1">util</span>
+<span class="s3">from </span><span class="s1">jax._src </span><span class="s3">import </span><span class="s1">source_info_util</span>
+<span class="s3">from </span><span class="s1">jax._src.lib </span><span class="s3">import </span><span class="s1">xla_client</span>
+
+<span class="s1">map</span><span class="s3">, </span><span class="s1">unsafe_map = util.safe_map</span><span class="s3">, </span><span class="s1">map</span>
+<span class="s1">zip</span><span class="s3">, </span><span class="s1">unsafe_zip = util.safe_zip</span><span class="s3">, </span><span class="s1">zip</span>
+
+
+<span class="s3">def </span><span class="s1">all_eqns(jaxpr: core.Jaxpr):</span>
+  <span class="s3">for </span><span class="s1">eqn </span><span class="s3">in </span><span class="s1">jaxpr.eqns:</span>
+    <span class="s3">yield </span><span class="s1">(jaxpr</span><span class="s3">, </span><span class="s1">eqn)</span>
+  <span class="s3">for </span><span class="s1">subjaxpr </span><span class="s3">in </span><span class="s1">core.subjaxprs(jaxpr):</span>
+    <span class="s3">yield from </span><span class="s1">all_eqns(subjaxpr)</span>
+
+<span class="s3">def </span><span class="s1">collect_eqns(jaxpr: core.Jaxpr</span><span class="s3">, </span><span class="s1">key: Callable):</span>
+  <span class="s1">d = collections.defaultdict(list)</span>
+  <span class="s3">for </span><span class="s1">_</span><span class="s3">, </span><span class="s1">eqn </span><span class="s3">in </span><span class="s1">all_eqns(jaxpr):</span>
+    <span class="s1">d[key(eqn)].append(eqn)</span>
+  <span class="s3">return </span><span class="s1">dict(d)</span>
+
+<span class="s3">def </span><span class="s1">histogram(jaxpr: core.Jaxpr</span><span class="s3">, </span><span class="s1">key: Callable</span><span class="s3">,</span>
+              <span class="s1">key_fmt: Callable = </span><span class="s3">lambda </span><span class="s1">x: x):</span>
+  <span class="s1">d = collect_eqns(jaxpr</span><span class="s3">, </span><span class="s1">key)</span>
+  <span class="s3">return </span><span class="s1">{key_fmt(k): len(v) </span><span class="s3">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v </span><span class="s3">in </span><span class="s1">d.items()}</span>
+
+<span class="s3">def </span><span class="s1">primitives(jaxpr: core.Jaxpr):</span>
+  <span class="s3">return </span><span class="s1">histogram(jaxpr</span><span class="s3">, lambda </span><span class="s1">eqn: eqn.primitive.name)</span>
+
+<span class="s3">def </span><span class="s1">primitives_by_source(jaxpr: core.Jaxpr):</span>
+  <span class="s3">def </span><span class="s1">key(eqn):</span>
+    <span class="s1">src = source_info_util.summarize(eqn.source_info)</span>
+    <span class="s3">return </span><span class="s1">(eqn.primitive.name</span><span class="s3">, </span><span class="s1">src)</span>
+  <span class="s3">return </span><span class="s1">histogram(jaxpr</span><span class="s3">, </span><span class="s1">key</span><span class="s3">, </span><span class="s4">' @ '</span><span class="s1">.join)</span>
+
+<span class="s3">def </span><span class="s1">primitives_by_shape(jaxpr: core.Jaxpr):</span>
+  <span class="s3">def </span><span class="s1">shape_fmt(var):</span>
+    <span class="s3">return </span><span class="s4">'*' </span><span class="s3">if </span><span class="s1">isinstance(var</span><span class="s3">, </span><span class="s1">core.DropVar) </span><span class="s3">else </span><span class="s1">var.aval.str_short()</span>
+  <span class="s3">def </span><span class="s1">key(eqn):</span>
+    <span class="s3">return </span><span class="s1">(eqn.primitive.name</span><span class="s3">, </span><span class="s4">' '</span><span class="s1">.join(map(shape_fmt</span><span class="s3">, </span><span class="s1">eqn.outvars)))</span>
+  <span class="s3">return </span><span class="s1">histogram(jaxpr</span><span class="s3">, </span><span class="s1">key</span><span class="s3">, </span><span class="s4">' :: '</span><span class="s1">.join)</span>
+
+<span class="s3">def </span><span class="s1">source_locations(jaxpr: core.Jaxpr):</span>
+  <span class="s3">def </span><span class="s1">key(eqn):</span>
+    <span class="s3">return </span><span class="s1">source_info_util.summarize(eqn.source_info)</span>
+  <span class="s3">return </span><span class="s1">histogram(jaxpr</span><span class="s3">, </span><span class="s1">key)</span>
+
+<span class="s1">MaybeEqn = Optional[core.JaxprEqn]</span>
+
+<span class="s3">def </span><span class="s1">var_defs_and_refs(jaxpr: core.Jaxpr):</span>
+  <span class="s1">defs: Dict[core.Var</span><span class="s3">, </span><span class="s1">MaybeEqn] = {}</span>
+  <span class="s1">refs: Dict[core.Var</span><span class="s3">, </span><span class="s1">List[MaybeEqn]] = {}</span>
+
+  <span class="s3">def </span><span class="s1">read(a: core.Atom</span><span class="s3">, </span><span class="s1">eqn: MaybeEqn):</span>
+    <span class="s3">if not </span><span class="s1">isinstance(a</span><span class="s3">, </span><span class="s1">core.Literal):</span>
+      <span class="s3">assert </span><span class="s1">a </span><span class="s3">in </span><span class="s1">defs</span><span class="s3">, </span><span class="s1">a</span>
+      <span class="s3">assert </span><span class="s1">a </span><span class="s3">in </span><span class="s1">refs</span><span class="s3">, </span><span class="s1">a</span>
+      <span class="s1">refs[a].append(eqn)</span>
+
+  <span class="s3">def </span><span class="s1">write(v: core.Var</span><span class="s3">, </span><span class="s1">eqn: MaybeEqn):</span>
+    <span class="s3">assert </span><span class="s1">v </span><span class="s3">not in </span><span class="s1">defs</span><span class="s3">, </span><span class="s1">v</span>
+    <span class="s3">assert </span><span class="s1">v </span><span class="s3">not in </span><span class="s1">refs</span><span class="s3">, </span><span class="s1">v</span>
+    <span class="s3">if not </span><span class="s1">isinstance(v</span><span class="s3">, </span><span class="s1">core.DropVar):</span>
+      <span class="s1">defs[v] = eqn</span>
+      <span class="s1">refs[v] = []</span>
+
+  <span class="s3">for </span><span class="s1">v </span><span class="s3">in </span><span class="s1">jaxpr.constvars:</span>
+    <span class="s1">write(v</span><span class="s3">, None</span><span class="s1">)</span>
+  <span class="s3">for </span><span class="s1">v </span><span class="s3">in </span><span class="s1">jaxpr.invars:</span>
+    <span class="s1">write(v</span><span class="s3">, None</span><span class="s1">)</span>
+
+  <span class="s3">for </span><span class="s1">eqn </span><span class="s3">in </span><span class="s1">jaxpr.eqns:</span>
+    <span class="s3">for </span><span class="s1">a </span><span class="s3">in </span><span class="s1">eqn.invars:</span>
+      <span class="s1">read(a</span><span class="s3">, </span><span class="s1">eqn)</span>
+    <span class="s3">for </span><span class="s1">v </span><span class="s3">in </span><span class="s1">eqn.outvars:</span>
+      <span class="s1">write(v</span><span class="s3">, </span><span class="s1">eqn)</span>
+
+  <span class="s3">for </span><span class="s1">a </span><span class="s3">in </span><span class="s1">jaxpr.outvars:</span>
+    <span class="s1">read(a</span><span class="s3">, None</span><span class="s1">)</span>
+
+  <span class="s1">res = [(v</span><span class="s3">, </span><span class="s1">defs[v]</span><span class="s3">, </span><span class="s1">refs[v]) </span><span class="s3">for </span><span class="s1">v </span><span class="s3">in </span><span class="s1">defs]</span>
+  <span class="s1">subs = map(var_defs_and_refs</span><span class="s3">, </span><span class="s1">core.subjaxprs(jaxpr))</span>
+  <span class="s3">return </span><span class="s1">[(jaxpr</span><span class="s3">, </span><span class="s1">res)</span><span class="s3">, </span><span class="s1">*subs] </span><span class="s3">if </span><span class="s1">subs </span><span class="s3">else </span><span class="s1">(jaxpr</span><span class="s3">, </span><span class="s1">res)</span>
+
+<span class="s3">def </span><span class="s1">vars_by_fanout(jaxpr: core.Jaxpr):</span>
+  <span class="s3">def </span><span class="s1">fmt_key(var</span><span class="s3">, </span><span class="s1">eqn):</span>
+    <span class="s3">if </span><span class="s1">eqn </span><span class="s3">is None</span><span class="s1">:</span>
+      <span class="s3">return </span><span class="s4">f'</span><span class="s3">{</span><span class="s1">var</span><span class="s3">} </span><span class="s4">&lt;- invar'</span>
+    <span class="s3">else</span><span class="s1">:</span>
+      <span class="s1">src = source_info_util.summarize(eqn.source_info)</span>
+      <span class="s3">return </span><span class="s4">f'</span><span class="s3">{</span><span class="s1">var</span><span class="s3">} </span><span class="s4">&lt;- </span><span class="s3">{</span><span class="s1">eqn.primitive.name</span><span class="s3">} </span><span class="s4">@ </span><span class="s3">{</span><span class="s1">src</span><span class="s3">}</span><span class="s4">'</span>
+
+  <span class="s3">def </span><span class="s1">hist(jaxpr</span><span class="s3">, </span><span class="s1">reads):</span>
+    <span class="s3">return </span><span class="s1">{fmt_key(var</span><span class="s3">, </span><span class="s1">var_def): len(var_refs)</span>
+            <span class="s3">for </span><span class="s1">var</span><span class="s3">, </span><span class="s1">var_def</span><span class="s3">, </span><span class="s1">var_refs </span><span class="s3">in </span><span class="s1">reads}</span>
+
+  <span class="s3">return </span><span class="s1">[(j</span><span class="s3">, </span><span class="s1">hist(j</span><span class="s3">, </span><span class="s1">reads)) </span><span class="s3">for </span><span class="s1">j</span><span class="s3">, </span><span class="s1">reads </span><span class="s3">in </span><span class="s1">var_defs_and_refs(jaxpr)]  </span><span class="s0"># pytype: disable=bad-unpacking</span>
+
+<span class="s3">def </span><span class="s1">print_histogram(histogram: Dict[Any</span><span class="s3">, </span><span class="s1">int]):</span>
+  <span class="s1">count_width = max(len(str(v)) </span><span class="s3">for </span><span class="s1">v </span><span class="s3">in </span><span class="s1">histogram.values())</span>
+  <span class="s1">count_fmt = </span><span class="s4">'{:&gt;' </span><span class="s1">+ str(count_width) + </span><span class="s4">'d}'</span>
+  <span class="s1">pairs = [(v</span><span class="s3">, </span><span class="s1">k) </span><span class="s3">for </span><span class="s1">k</span><span class="s3">, </span><span class="s1">v </span><span class="s3">in </span><span class="s1">histogram.items()]</span>
+  <span class="s3">for </span><span class="s1">count</span><span class="s3">, </span><span class="s1">name </span><span class="s3">in </span><span class="s1">reversed(sorted(pairs)):</span>
+    <span class="s1">print(count_fmt.format(count)</span><span class="s3">, </span><span class="s1">name)</span>
+
+
+<span class="s3">def </span><span class="s1">_pprof_profile(</span>
+    <span class="s1">profile: Dict[Tuple[Optional[xla_client.Traceback]</span><span class="s3">, </span><span class="s1">core.Primitive]</span><span class="s3">, </span><span class="s1">int]</span>
+<span class="s1">) -&gt; bytes:</span>
+  <span class="s2">&quot;&quot;&quot;Converts a profile into a compressed pprof protocol buffer. 
+ 
+  The input profile is a map from (traceback, primitive) pairs to counts. 
+  &quot;&quot;&quot;</span>
+  <span class="s1">s: DefaultDict[str</span><span class="s3">, </span><span class="s1">int]</span>
+  <span class="s1">func: DefaultDict[types.CodeType</span><span class="s3">, </span><span class="s1">int]</span>
+  <span class="s1">loc: DefaultDict[Tuple[types.CodeType</span><span class="s3">, </span><span class="s1">int]</span><span class="s3">, </span><span class="s1">int]</span>
+
+  <span class="s1">s = collections.defaultdict(itertools.count(</span><span class="s5">1</span><span class="s1">).__next__)</span>
+  <span class="s1">func = collections.defaultdict(itertools.count(</span><span class="s5">1</span><span class="s1">).__next__)</span>
+  <span class="s1">loc = collections.defaultdict(itertools.count(</span><span class="s5">1</span><span class="s1">).__next__)</span>
+  <span class="s1">s[</span><span class="s4">&quot;&quot;</span><span class="s1">] = </span><span class="s5">0</span>
+  <span class="s1">primitive_key = s[</span><span class="s4">&quot;primitive&quot;</span><span class="s1">]</span>
+  <span class="s1">samples = []</span>
+  <span class="s3">for </span><span class="s1">(tb</span><span class="s3">, </span><span class="s1">primitive)</span><span class="s3">, </span><span class="s1">count </span><span class="s3">in </span><span class="s1">profile.items():</span>
+    <span class="s3">if </span><span class="s1">tb </span><span class="s3">is None</span><span class="s1">:</span>
+      <span class="s1">frames = []</span>
+    <span class="s3">else</span><span class="s1">:</span>
+      <span class="s1">raw_frames = zip(*tb.raw_frames())</span>
+      <span class="s1">frames = [loc[(code</span><span class="s3">, </span><span class="s1">lasti)] </span><span class="s3">for </span><span class="s1">code</span><span class="s3">, </span><span class="s1">lasti </span><span class="s3">in </span><span class="s1">raw_frames</span>
+                <span class="s3">if </span><span class="s1">source_info_util.is_user_filename(code.co_filename)]  </span><span class="s0"># type: ignore</span>
+    <span class="s1">samples.append({</span>
+       <span class="s4">&quot;location_id&quot;</span><span class="s1">: frames</span><span class="s3">,</span>
+       <span class="s4">&quot;value&quot;</span><span class="s1">: [count]</span><span class="s3">,</span>
+       <span class="s4">&quot;label&quot;</span><span class="s1">: [{</span>
+         <span class="s4">&quot;key&quot;</span><span class="s1">: primitive_key</span><span class="s3">,</span>
+         <span class="s4">&quot;str&quot;</span><span class="s1">: s[primitive.name]</span>
+        <span class="s1">}]</span>
+    <span class="s1">})</span>
+
+  <span class="s1">locations = [</span>
+      <span class="s1">{</span><span class="s4">&quot;id&quot;</span><span class="s1">: loc_id</span><span class="s3">,</span>
+       <span class="s4">&quot;line&quot;</span><span class="s1">: [{</span><span class="s4">&quot;function_id&quot;</span><span class="s1">: func[code]</span><span class="s3">,</span>
+                 <span class="s4">&quot;line&quot;</span><span class="s1">: xla_client.Traceback.code_addr2line(code</span><span class="s3">, </span><span class="s1">lasti)}]}</span>
+      <span class="s3">for </span><span class="s1">(code</span><span class="s3">, </span><span class="s1">lasti)</span><span class="s3">, </span><span class="s1">loc_id </span><span class="s3">in </span><span class="s1">loc.items()</span>
+  <span class="s1">]</span>
+  <span class="s1">functions = [</span>
+      <span class="s1">{</span><span class="s4">&quot;id&quot;</span><span class="s1">: func_id</span><span class="s3">,</span>
+       <span class="s4">&quot;name&quot;</span><span class="s1">: s[code.co_name]</span><span class="s3">,</span>
+       <span class="s4">&quot;system_name&quot;</span><span class="s1">: s[code.co_name]</span><span class="s3">,</span>
+       <span class="s4">&quot;filename&quot;</span><span class="s1">: s[code.co_filename]</span><span class="s3">,</span>
+       <span class="s4">&quot;start_line&quot;</span><span class="s1">: code.co_firstlineno}</span>
+      <span class="s3">for </span><span class="s1">code</span><span class="s3">, </span><span class="s1">func_id </span><span class="s3">in </span><span class="s1">func.items()</span>
+  <span class="s1">]</span>
+  <span class="s1">sample_type = [{</span><span class="s4">&quot;type&quot;</span><span class="s1">: s[</span><span class="s4">&quot;equations&quot;</span><span class="s1">]</span><span class="s3">, </span><span class="s4">&quot;unit&quot;</span><span class="s1">: s[</span><span class="s4">&quot;count&quot;</span><span class="s1">]}]</span>
+  <span class="s0"># This is the JSON encoding of a pprof profile protocol buffer. See:</span>
+  <span class="s0"># https://github.com/google/pprof/blob/master/proto/profile.proto for a</span>
+  <span class="s0"># description of the format.</span>
+  <span class="s1">json_profile = json.dumps({</span>
+    <span class="s4">&quot;string_table&quot;</span><span class="s1">: list(s.keys())</span><span class="s3">,</span>
+    <span class="s4">&quot;location&quot;</span><span class="s1">: locations</span><span class="s3">,</span>
+    <span class="s4">&quot;function&quot;</span><span class="s1">: functions</span><span class="s3">,</span>
+    <span class="s4">&quot;sample_type&quot;</span><span class="s1">: sample_type</span><span class="s3">,</span>
+    <span class="s4">&quot;sample&quot;</span><span class="s1">: samples</span><span class="s3">,</span>
+  <span class="s1">})</span>
+  <span class="s3">return </span><span class="s1">gzip.compress(xla_client._xla.json_to_pprof_profile(json_profile))</span>
+
+
+<span class="s3">def </span><span class="s1">pprof_equation_profile(jaxpr: core.Jaxpr) -&gt; bytes:</span>
+  <span class="s2">&quot;&quot;&quot;Generates a pprof profile that maps jaxpr equations to Python stack traces. 
+ 
+  By visualizing the profile using pprof, one can identify Python code that is 
+  responsible for yielding large numbers of jaxpr equations. 
+ 
+  Args: 
+    jaxpr: a Jaxpr. 
+ 
+  Returns: 
+    A gzip-compressed pprof Profile protocol buffer, suitable for passing to 
+    pprof tool for visualization. 
+  &quot;&quot;&quot;</span>
+  <span class="s1">d: DefaultDict[Tuple[Optional[xla_client.Traceback]</span><span class="s3">, </span><span class="s1">core.Primitive]</span><span class="s3">, </span><span class="s1">int]</span>
+  <span class="s1">d = collections.defaultdict(</span><span class="s3">lambda</span><span class="s1">: </span><span class="s5">0</span><span class="s1">)</span>
+  <span class="s3">for </span><span class="s1">_</span><span class="s3">, </span><span class="s1">eqn </span><span class="s3">in </span><span class="s1">all_eqns(jaxpr):</span>
+    <span class="s1">d[(eqn.source_info.traceback</span><span class="s3">, </span><span class="s1">eqn.primitive)] += </span><span class="s5">1</span>
+  <span class="s3">return </span><span class="s1">_pprof_profile(d)</span>
+</pre>
+</body>
+</html>

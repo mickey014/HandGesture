@@ -1,0 +1,8 @@
+0 dislike
+1 good_job
+2 good_luck
+3 hi
+4 ok
+5 peace
+6 rock
+7 you

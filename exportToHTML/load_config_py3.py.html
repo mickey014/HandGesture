@@ -1,0 +1,30 @@
+<html>
+<head>
+<title>load_config_py3.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6897bb;}
+.s4 { color: #6a8759;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+load_config_py3.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># flake8: noqa</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">sys</span>
+
+<span class="s2">if </span><span class="s1">sys.version_info[:</span><span class="s3">2</span><span class="s1">] &gt;= (</span><span class="s3">3</span><span class="s2">, </span><span class="s3">0</span><span class="s1">):</span>
+    <span class="s2">def </span><span class="s1">exec_file_wrapper(fpath</span><span class="s2">, </span><span class="s1">g_vars</span><span class="s2">, </span><span class="s1">l_vars):</span>
+        <span class="s2">with </span><span class="s1">open(fpath) </span><span class="s2">as </span><span class="s1">f:</span>
+            <span class="s1">code = compile(f.read()</span><span class="s2">, </span><span class="s1">os.path.basename(fpath)</span><span class="s2">, </span><span class="s4">'exec'</span><span class="s1">)</span>
+            <span class="s1">exec(code</span><span class="s2">, </span><span class="s1">g_vars</span><span class="s2">, </span><span class="s1">l_vars)</span>
+</pre>
+</body>
+</html>

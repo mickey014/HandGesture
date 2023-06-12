@@ -1,0 +1,44 @@
+<html>
+<head>
+<title>config-3.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #a9b7c6;}
+.s1 { color: #cc7832;}
+.s2 { color: #808080;}
+.s3 { color: #6a8759;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+config-3.py</font>
+</center></td></tr></table>
+<pre><span class="s0">PYTHON_EXTENSIONS_PATHS = [</span>
+    <span class="s0">LOADER_DIR</span>
+<span class="s0">] + PYTHON_EXTENSIONS_PATHS</span>
+
+<span class="s0">ci_and_not_headless = </span><span class="s1">False</span>
+
+<span class="s1">try</span><span class="s0">:</span>
+    <span class="s1">from </span><span class="s0">.version </span><span class="s1">import </span><span class="s0">ci_build</span><span class="s1">, </span><span class="s0">headless</span>
+
+    <span class="s0">ci_and_not_headless = ci_build </span><span class="s1">and not </span><span class="s0">headless</span>
+<span class="s1">except</span><span class="s0">:</span>
+    <span class="s1">pass</span>
+
+<span class="s2"># the Qt plugin is included currently only in the pre-built wheels</span>
+<span class="s1">if </span><span class="s0">sys.platform.startswith(</span><span class="s3">&quot;linux&quot;</span><span class="s0">) </span><span class="s1">and </span><span class="s0">ci_and_not_headless:</span>
+    <span class="s0">os.environ[</span><span class="s3">&quot;QT_QPA_PLATFORM_PLUGIN_PATH&quot;</span><span class="s0">] = os.path.join(</span>
+        <span class="s0">os.path.dirname(os.path.abspath(__file__))</span><span class="s1">, </span><span class="s3">&quot;qt&quot;</span><span class="s1">, </span><span class="s3">&quot;plugins&quot;</span>
+    <span class="s0">)</span>
+
+<span class="s2"># Qt will throw warning on Linux if fonts are not found</span>
+<span class="s1">if </span><span class="s0">sys.platform.startswith(</span><span class="s3">&quot;linux&quot;</span><span class="s0">) </span><span class="s1">and </span><span class="s0">ci_and_not_headless:</span>
+    <span class="s0">os.environ[</span><span class="s3">&quot;QT_QPA_FONTDIR&quot;</span><span class="s0">] = os.path.join(</span>
+        <span class="s0">os.path.dirname(os.path.abspath(__file__))</span><span class="s1">, </span><span class="s3">&quot;qt&quot;</span><span class="s1">, </span><span class="s3">&quot;fonts&quot;</span>
+    <span class="s0">)</span>
+</pre>
+</body>
+</html>
