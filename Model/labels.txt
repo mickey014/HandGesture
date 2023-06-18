@@ -1,8 +1,7 @@
 0 dislike
 1 good_job
-2 good_luck
+2 goodluck
 3 hi
 4 ok
 5 peace
-6 rock
-7 you
+6 you

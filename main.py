@@ -13,7 +13,7 @@ imgSize = 300
 counter = 0
 
 folder = "Data/ok"
-labels = ["dislike", "good_job", "good_luck", "hi", "ok", "peace", "rock", "you"]
+labels = ["dislike", "good_job", "good_luck", "hi", "ok", "peace", "you"]
 
 while True:
     success, img = cap.read()
